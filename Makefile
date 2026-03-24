@@ -1,5 +1,5 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
-LDFLAGS := -ldflags "-s -w -X github.com/beaconclaw/agent/internal/agent.Version=$(VERSION)"
+LDFLAGS := -ldflags "-s -w -X github.com/beaconclaw/beaconclaw/internal/agent.Version=$(VERSION)"
 BINARY := beaconclaw
 BUILD_DIR := bin
 

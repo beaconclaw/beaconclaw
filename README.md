@@ -90,7 +90,7 @@ git push origin main --tags
 The workflow runs tests, cross-compiles for all targets (linux/darwin, amd64/arm64), and attaches the binaries to the release at:
 
 ```
-https://github.com/beaconclaw/agent/releases/download/v0.1.0/beaconclaw-linux-amd64
+https://github.com/beaconclaw/beaconclaw/releases/download/v0.1.0/beaconclaw-linux-amd64
 ```
 
 The version tag is baked into the binary via `-ldflags` at build time, so `beaconclaw version` will print the tag (e.g. `beaconclaw v0.1.0`).

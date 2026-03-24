@@ -10,9 +10,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/beaconclaw/agent/internal/agent"
-	"github.com/beaconclaw/agent/internal/config"
-	"github.com/beaconclaw/agent/internal/openclaw"
+	"github.com/beaconclaw/beaconclaw/internal/agent"
+	"github.com/beaconclaw/beaconclaw/internal/config"
+	"github.com/beaconclaw/beaconclaw/internal/openclaw"
 )
 
 func main() {

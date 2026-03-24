@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/beaconclaw/agent/internal/openclaw"
+	"github.com/beaconclaw/beaconclaw/internal/openclaw"
 )
 
 // Payload is the data sent to the BeaconClaw manager every heartbeat interval.

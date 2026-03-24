@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/beaconclaw/agent/internal/openclaw"
+	"github.com/beaconclaw/beaconclaw/internal/openclaw"
 )
 
 func readyServer() *httptest.Server {

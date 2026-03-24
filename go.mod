@@ -1,4 +1,4 @@
-module github.com/beaconclaw/agent
+module github.com/beaconclaw/beaconclaw
 
 go 1.26.1
 

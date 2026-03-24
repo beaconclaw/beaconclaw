@@ -8,11 +8,11 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/beaconclaw/agent/internal/buffer"
-	"github.com/beaconclaw/agent/internal/config"
-	"github.com/beaconclaw/agent/internal/heartbeat"
-	"github.com/beaconclaw/agent/internal/openclaw"
-	"github.com/beaconclaw/agent/internal/ws"
+	"github.com/beaconclaw/beaconclaw/internal/buffer"
+	"github.com/beaconclaw/beaconclaw/internal/config"
+	"github.com/beaconclaw/beaconclaw/internal/heartbeat"
+	"github.com/beaconclaw/beaconclaw/internal/openclaw"
+	"github.com/beaconclaw/beaconclaw/internal/ws"
 )
 
 // Agent is the main daemon orchestrator.
