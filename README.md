@@ -75,6 +75,39 @@ Optional. Place at `~/.beaconclaw/config.json`:
 
 Priority: CLI flags > env vars > config file > defaults.
 
+## Releasing
+
+Releases are automated via GitHub Actions. Pushing a version tag builds cross-platform binaries and publishes them as a GitHub Release.
+
+```sh
+# Tag the release
+git tag v0.1.0
+
+# Push the tag (triggers the release workflow)
+git push origin main --tags
+```
+
+The workflow runs tests, cross-compiles for all targets (linux/darwin, amd64/arm64), and attaches the binaries to the release at:
+
+```
+https://github.com/beaconclaw/agent/releases/download/v0.1.0/beaconclaw-linux-amd64
+```
+
+The version tag is baked into the binary via `-ldflags` at build time, so `beaconclaw version` will print the tag (e.g. `beaconclaw v0.1.0`).
+
+### Manual Deploy
+
+To deploy without a release (e.g. testing on a VM):
+
+```sh
+# Build for the target platform
+GOOS=linux GOARCH=amd64 make build
+
+# Copy to the server
+scp bin/beaconclaw-linux-amd64 root@your-vm:/usr/local/bin/beaconclaw
+ssh root@your-vm chmod +x /usr/local/bin/beaconclaw
+```
+
 ## Project Structure
 
 ```
