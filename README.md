@@ -44,11 +44,19 @@ The binary is output to `bin/beaconclaw`.
 # Authenticate with your fleet token (one-time setup)
 beaconclaw auth --token bc_your_token_here
 
-# Start the daemon
-beaconclaw
+# Install as a system service (auto-starts on boot, restarts on failure)
+beaconclaw install
 
-# Check local OpenClaw status
+# Manage the daemon
+beaconclaw start
+beaconclaw stop
+beaconclaw restart
+
+# Check status
 beaconclaw status
+
+# Remove the system service
+beaconclaw uninstall
 
 # Print version
 beaconclaw version

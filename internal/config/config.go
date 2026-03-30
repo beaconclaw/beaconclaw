@@ -20,9 +20,8 @@ const (
 	stateDir       = ".beaconclaw"
 	instanceIDFile = "instance-id"
 	configFile     = "config.json"
-
-	openclawStateDir  = ".openclaw"
-	openclawConfig    = "openclaw.json"
+	openclawStateDir = ".openclaw"
+	openclawConfig   = "openclaw.json"
 )
 
 type Config struct {
