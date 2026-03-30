@@ -26,9 +26,9 @@ func main() {
 		RunE:  runDaemon,
 	}
 
-	root.Flags().String("token", "", "Fleet token (overrides BEACONCLAW_TOKEN)")
 	root.Flags().String("endpoint", "", "Manager WebSocket endpoint (overrides BEACONCLAW_ENDPOINT)")
 
+	root.AddCommand(authCmd())
 	root.AddCommand(versionCmd())
 	root.AddCommand(statusCmd())
 
@@ -44,9 +44,6 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	}
 
 	// CLI flags override env/config
-	if v, _ := cmd.Flags().GetString("token"); v != "" {
-		cfg.Token = v
-	}
 	if v, _ := cmd.Flags().GetString("endpoint"); v != "" {
 		cfg.Endpoint = v
 	}
@@ -69,6 +66,31 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 
 	a := agent.New(cfg)
 	return a.Run(ctx)
+}
+
+func authCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "auth",
+		Short: "Authenticate this instance with a fleet token",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			token, _ := cmd.Flags().GetString("token")
+			if token == "" {
+				return fmt.Errorf("token required: beaconclaw auth --token <your-fleet-token>")
+			}
+
+			if err := config.SaveToken(token); err != nil {
+				return fmt.Errorf("save token: %w", err)
+			}
+
+			fmt.Println("Token saved. Run 'beaconclaw' to start the agent.")
+			return nil
+		},
+	}
+
+	cmd.Flags().String("token", "", "Fleet token (starts with bc_)")
+	_ = cmd.MarkFlagRequired("token")
+
+	return cmd
 }
 
 func versionCmd() *cobra.Command {

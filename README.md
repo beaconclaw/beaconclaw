@@ -41,8 +41,11 @@ The binary is output to `bin/beaconclaw`.
 ## Usage
 
 ```sh
+# Authenticate with your fleet token (one-time setup)
+beaconclaw auth --token bc_your_token_here
+
 # Start the daemon
-beaconclaw --token bc_your_token_here
+beaconclaw
 
 # Check local OpenClaw status
 beaconclaw status

@@ -99,7 +99,7 @@ func Load() (*Config, error) {
 
 func Validate(cfg *Config) error {
 	if cfg.Token == "" {
-		return fmt.Errorf("fleet token required: set BEACONCLAW_TOKEN or configure in %s", configFilePath())
+		return fmt.Errorf("fleet token required: run 'beaconclaw auth --token <token>' or set BEACONCLAW_TOKEN")
 	}
 	if !strings.HasPrefix(cfg.Token, "bc_") {
 		return fmt.Errorf("fleet token must start with 'bc_' prefix")
@@ -123,6 +123,35 @@ func stateDirectory() string {
 
 func configFilePath() string {
 	return filepath.Join(stateDirectory(), configFile)
+}
+
+func SaveToken(token string) error {
+	if !strings.HasPrefix(token, "bc_") {
+		return fmt.Errorf("fleet token must start with 'bc_' prefix")
+	}
+
+	dir := stateDirectory()
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return fmt.Errorf("create config dir: %w", err)
+	}
+
+	// Load existing config to preserve other fields
+	fc, _ := loadFileConfig()
+	if fc == nil {
+		fc = &fileConfig{}
+	}
+	fc.Token = token
+
+	data, err := json.MarshalIndent(fc, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+
+	if err := os.WriteFile(configFilePath(), append(data, '\n'), 0600); err != nil {
+		return fmt.Errorf("write config: %w", err)
+	}
+
+	return nil
 }
 
 func loadFileConfig() (*fileConfig, error) {
