@@ -33,3 +33,5 @@ jobs:
             bin/beaconclaw-linux-arm64
             bin/beaconclaw-darwin-amd64
             bin/beaconclaw-darwin-arm64
+            bin/beaconclaw-windows-amd64.exe
+            bin/beaconclaw-windows-arm64.exe
