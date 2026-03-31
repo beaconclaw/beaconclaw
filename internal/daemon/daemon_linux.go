@@ -34,12 +34,13 @@ Wants=network-online.target
 [Service]
 Type=simple
 ExecStart=%s --_daemon
+Environment="PATH=%s"
 Restart=on-failure
 RestartSec=5
 
 [Install]
 WantedBy=default.target
-`, execPath)
+`, execPath, os.Getenv("PATH"))
 }
 
 func systemctl(args ...string) ([]byte, error) {
