@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"os"
 	"runtime"
@@ -124,7 +123,7 @@ func (a *Agent) connectWithRetry(ctx context.Context) {
 			OS:         runtime.GOOS,
 			Arch:       runtime.GOARCH,
 			Hostname:   hostname,
-			Version:    fmt.Sprintf("beaconclaw/%s", Version),
+			Version:    Version,
 		}
 		if err := a.client.SendRegistration(reg); err != nil {
 			log.Printf("registration failed: %v", err)
