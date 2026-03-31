@@ -151,8 +151,10 @@ func detectVersion() string {
 	}
 
 	version := strings.TrimSpace(string(out))
-	// openclaw --version may output "openclaw/2026.3.15" or just "2026.3.15"
-	if idx := strings.LastIndex(version, "/"); idx >= 0 {
+	// openclaw --version outputs "OpenClaw 2026.3.28 (f9b1079)" or "openclaw/2026.3.15"
+	if parts := strings.Fields(version); len(parts) >= 2 {
+		version = parts[1] // extract "2026.3.28" from "OpenClaw 2026.3.28 ..."
+	} else if idx := strings.LastIndex(version, "/"); idx >= 0 {
 		version = version[idx+1:]
 	}
 	if version == "" {
