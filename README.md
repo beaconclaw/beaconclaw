@@ -18,7 +18,7 @@ All connections are **outbound**. No inbound firewall rules needed.
 
 - Go 1.22+
 - An OpenClaw instance running locally
-- A BeaconClaw fleet token (`bc_` prefix)
+- A BeaconClaw instance token (`bc_` prefix)
 
 ## Local Development
 
@@ -41,7 +41,7 @@ The binary is output to `bin/beaconclaw`.
 ## Usage
 
 ```sh
-# Authenticate with your fleet token (one-time setup)
+# Authenticate with your instance token (one-time setup)
 beaconclaw auth --token bc_your_token_here
 
 # Install as a system service (auto-starts on boot, restarts on failure)
@@ -66,7 +66,7 @@ beaconclaw version
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `BEACONCLAW_TOKEN` | Fleet token (required) | — |
+| `BEACONCLAW_TOKEN` | Instance token (required) | — |
 | `BEACONCLAW_ENDPOINT` | Manager WebSocket URL | `wss://api.beaconclaw.ai/ws` |
 | `BEACONCLAW_OPENCLAW_PORT` | Override OpenClaw gateway port | auto-detected |
 

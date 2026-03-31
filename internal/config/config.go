@@ -98,10 +98,10 @@ func Load() (*Config, error) {
 
 func Validate(cfg *Config) error {
 	if cfg.Token == "" {
-		return fmt.Errorf("fleet token required: run 'beaconclaw auth --token <token>' or set BEACONCLAW_TOKEN")
+		return fmt.Errorf("instance token required: run 'beaconclaw auth --token <token>' or set BEACONCLAW_TOKEN")
 	}
 	if !strings.HasPrefix(cfg.Token, "bc_") {
-		return fmt.Errorf("fleet token must start with 'bc_' prefix")
+		return fmt.Errorf("instance token must start with 'bc_' prefix")
 	}
 	if cfg.Endpoint == "" {
 		return fmt.Errorf("manager endpoint required")
@@ -126,7 +126,7 @@ func configFilePath() string {
 
 func SaveToken(token string) error {
 	if !strings.HasPrefix(token, "bc_") {
-		return fmt.Errorf("fleet token must start with 'bc_' prefix")
+		return fmt.Errorf("instance token must start with 'bc_' prefix")
 	}
 
 	dir := stateDirectory()

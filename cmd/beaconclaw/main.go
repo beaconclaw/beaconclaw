@@ -71,7 +71,7 @@ func runRoot(cmd *cobra.Command, args []string) {
 func authCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "auth",
-		Short: "Authenticate this instance with a fleet token",
+		Short: "Authenticate this instance with an instance token",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			token, _ := cmd.Flags().GetString("token")
 			if token == "" {
@@ -87,7 +87,7 @@ func authCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().String("token", "", "Fleet token (starts with bc_)")
+	cmd.Flags().String("token", "", "Instance token (starts with bc_)")
 	_ = cmd.MarkFlagRequired("token")
 
 	return cmd
