@@ -36,7 +36,7 @@ func New(cfg *config.Config) *Agent {
 
 // Run starts the agent and blocks until the context is cancelled.
 func (a *Agent) Run(ctx context.Context) error {
-	log.Printf("beaconclaw agent starting (instance=%s)", a.cfg.InstanceID)
+	log.Printf("beaconclaw agent starting (agent=%s)", a.cfg.InstanceID)
 	log.Printf("manager endpoint: %s", a.cfg.Endpoint)
 	log.Printf("openclaw gateway: http://127.0.0.1:%d", a.cfg.OpenClawPort)
 

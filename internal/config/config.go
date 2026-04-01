@@ -89,7 +89,7 @@ func Load() (*Config, error) {
 	// Load or generate instance ID
 	id, err := loadOrCreateInstanceID()
 	if err != nil {
-		return nil, fmt.Errorf("instance ID: %w", err)
+		return nil, fmt.Errorf("agent ID: %w", err)
 	}
 	cfg.InstanceID = id
 
@@ -98,10 +98,10 @@ func Load() (*Config, error) {
 
 func Validate(cfg *Config) error {
 	if cfg.Token == "" {
-		return fmt.Errorf("instance token required: run 'beaconclaw auth --token <token>' or set BEACONCLAW_TOKEN")
+		return fmt.Errorf("agent token required: run 'beaconclaw auth --token <token>' or set BEACONCLAW_TOKEN")
 	}
 	if !strings.HasPrefix(cfg.Token, "bc_") {
-		return fmt.Errorf("instance token must start with 'bc_' prefix")
+		return fmt.Errorf("agent token must start with 'bc_' prefix")
 	}
 	if cfg.Endpoint == "" {
 		return fmt.Errorf("manager endpoint required")
@@ -126,7 +126,7 @@ func configFilePath() string {
 
 func SaveToken(token string) error {
 	if !strings.HasPrefix(token, "bc_") {
-		return fmt.Errorf("instance token must start with 'bc_' prefix")
+		return fmt.Errorf("agent token must start with 'bc_' prefix")
 	}
 
 	dir := stateDirectory()
@@ -228,7 +228,7 @@ func loadOrCreateInstanceID() (string, error) {
 		return "", fmt.Errorf("create state dir: %w", err)
 	}
 	if err := os.WriteFile(path, []byte(id+"\n"), 0600); err != nil {
-		return "", fmt.Errorf("write instance ID: %w", err)
+		return "", fmt.Errorf("write agent ID: %w", err)
 	}
 
 	return id, nil

@@ -30,7 +30,7 @@ func main() {
 	root := &cobra.Command{
 		Use:   "beaconclaw",
 		Short: "BeaconClaw agent — fleet monitoring sidecar for OpenClaw",
-		Long:  "Lightweight daemon that monitors a local OpenClaw instance and reports health to the BeaconClaw fleet manager.",
+		Long:  "Lightweight daemon that monitors a local OpenClaw gateway and reports health to the BeaconClaw fleet manager.",
 		Run:   runRoot,
 	}
 
@@ -71,7 +71,7 @@ func runRoot(cmd *cobra.Command, args []string) {
 func authCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "auth",
-		Short: "Authenticate this instance with an instance token",
+		Short: "Authenticate this agent with an agent token",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			token, _ := cmd.Flags().GetString("token")
 			if token == "" {
@@ -87,7 +87,7 @@ func authCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().String("token", "", "Instance token (starts with bc_)")
+	cmd.Flags().String("token", "", "Agent token (starts with bc_)")
 	_ = cmd.MarkFlagRequired("token")
 
 	return cmd
@@ -190,7 +190,7 @@ func statusCmd() *cobra.Command {
 				return fmt.Errorf("load config: %w", err)
 			}
 
-			fmt.Printf("Instance ID:  %s\n", cfg.InstanceID)
+			fmt.Printf("Agent ID:     %s\n", cfg.InstanceID)
 			fmt.Printf("Manager:      %s\n", cfg.Endpoint)
 			fmt.Printf("OpenClaw:     http://127.0.0.1:%d\n", cfg.OpenClawPort)
 

@@ -1,6 +1,6 @@
 # BeaconClaw Agent
 
-Fleet monitoring sidecar for [OpenClaw](https://github.com/openclaw/openclaw) instances. Runs alongside each OpenClaw gateway, reports health upstream to the BeaconClaw manager over outbound WebSocket.
+Fleet monitoring sidecar for [OpenClaw](https://github.com/openclaw/openclaw). Runs alongside each OpenClaw gateway, reports health upstream to the BeaconClaw manager over outbound WebSocket.
 
 ## How It Works
 
@@ -17,8 +17,8 @@ All connections are **outbound**. No inbound firewall rules needed.
 ## Requirements
 
 - Go 1.22+
-- An OpenClaw instance running locally
-- A BeaconClaw instance token (`bc_` prefix)
+- An OpenClaw gateway running locally
+- A BeaconClaw agent token (`bc_` prefix)
 
 ## Local Development
 
@@ -41,7 +41,7 @@ The binary is output to `bin/beaconclaw`.
 ## Usage
 
 ```sh
-# Authenticate with your instance token (one-time setup)
+# Authenticate with your agent token (one-time setup)
 beaconclaw auth --token bc_your_token_here
 
 # Install as a system service (auto-starts on boot, restarts on failure)
@@ -66,7 +66,7 @@ beaconclaw version
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `BEACONCLAW_TOKEN` | Instance token (required) | — |
+| `BEACONCLAW_TOKEN` | Agent token (required) | — |
 | `BEACONCLAW_ENDPOINT` | Manager WebSocket URL | `wss://api.beaconclaw.ai/ws` |
 | `BEACONCLAW_OPENCLAW_PORT` | Override OpenClaw gateway port | auto-detected |
 
