@@ -20,7 +20,7 @@ The buffer is not saved to disk. Heartbeats can be lost during a long outage or 
 
 ## What It Sends
 
-Outbound-only means nothing connects in to your machine. It does not mean no data leaves it. This is everything the agent sends, every 30 seconds:
+Outbound-only means nothing connects in to your machine. It does not mean no data leaves it. This is everything the agent sends. Everything but the inventory goes every 30 seconds:
 
 | Group | Fields |
 |-------|--------|
@@ -28,6 +28,7 @@ Outbound-only means nothing connects in to your machine. It does not mean no dat
 | Host | Hostname, operating system, architecture |
 | System metrics | CPU percent; memory total, used and percent; root disk total, used and percent |
 | Runtime (OpenClaw gateway) | Which runtime it is; whether it is present, healthy and ready; names of failing channels; uptime; gateway port; runtime version |
+| Inventory (every 15 minutes) | Names of the skills the runtime has loaded and where each comes from (for example, shipped with the runtime or added on this machine); names of the chat channels, tool servers and model providers it is set up to use; the commit of the runtime's workspace folder and whether that folder has uncommitted changes |
 | Agent | BeaconClaw agent version, protocol version, and what the runtime adapter can report (sent once per connection) |
 
 The runtime's state is sent twice in each heartbeat: once in a form that fits any runtime, and once in the original OpenClaw-named form, so that a manager on either protocol version understands it. Both carry the same facts.
@@ -35,7 +36,9 @@ The runtime's state is sent twice in each heartbeat: once in a form that fits an
 What it does not do, as of this version:
 
 - It does not read or send conversations, sessions, messages, prompts, logs, files, credentials or usage data.
-- It reads `~/.openclaw/openclaw.json` only to find the gateway port. If that file is missing it looks for the same setting in the older `~/.clawdbot/` and `~/.moldbot/` folders.
+- It reads `~/.openclaw/openclaw.json` only to find the gateway port and, for the inventory, the names of the entries under `channels`, `mcp.servers` and `models.providers`, with whether each is switched on. It reads nothing inside those entries: no tokens, keys, addresses or account names. If that file is missing it looks in the older `~/.clawdbot/` and `~/.moldbot/` folders.
+- For the inventory it runs `openclaw skills list --json` and keeps each usable skill's name and source. A skill's description and contents are not sent. A name that is not a short plain label (a path, an address, a sentence) is left out.
+- If the workspace folder is a git checkout it runs `git rev-parse HEAD` and `git status --porcelain` there, and sends the commit and a yes or no for uncommitted changes. It does not send the repository's address, branch names, file names or contents.
 - To learn the OpenClaw version it looks for the running gateway among the machine's processes, by command line, and reads the `name` and `version` fields of that copy's `package.json`. Command lines of other processes are not kept or sent. If that finds nothing, it follows the `openclaw` command to its package and reads the same two fields, and as a last resort runs `openclaw --version`.
 - It cannot receive or run commands from the manager.
 - It opens no listening ports.
@@ -162,6 +165,7 @@ Every command acts on one profile and leaves the others alone. Choose the profil
 | `BEACONCLAW_ENDPOINT` | Manager WebSocket URL | `wss://api.beaconclaw.ai/ws` |
 | `BEACONCLAW_OPENCLAW_PORT` | Override OpenClaw gateway port | auto-detected |
 | `BEACONCLAW_PROFILE` | Profile to act on | default profile |
+| `BEACONCLAW_INVENTORY` | `false` to stop reporting skill and connection names | `true` |
 
 `beaconclaw update` also reads `GITHUB_TOKEN` if it is set, and sends it to GitHub only to raise the download rate limit. `BEACONCLAW_RELEASES_API` and `BEACONCLAW_RELEASES_DOWNLOAD` point the updater at another release host for testing; it must be an `https` address unless it is on this machine.
 
@@ -170,6 +174,10 @@ The manager address must start with `wss://`. An unencrypted `ws://` address is 
 On Linux, `beaconclaw install` copies your current `PATH` into the service definition so the service can find `openclaw`.
 
 The agent auto-detects the OpenClaw gateway port from `~/.openclaw/openclaw.json`. You can also set `OPENCLAW_GATEWAY_PORT` to override.
+
+### Switching the inventory off
+
+The inventory is on by default. To send health only, set `"inventory": false` in the config file or `BEACONCLAW_INVENTORY=false` in the service's environment, then restart the agent. Nothing is then collected or sent for it, and the agent tells the manager it does not report an inventory.
 
 ### Config File
 
@@ -180,7 +188,8 @@ Optional. Place at `~/.beaconclaw/config.json`:
   "token": "bc_...",
   "endpoint": "wss://api.beaconclaw.ai/ws",
   "openclaw_port": 18789,
-  "channel": "stable"
+  "channel": "stable",
+  "inventory": true
 }
 ```
 

@@ -25,6 +25,10 @@ const (
 	// A heartbeat the manager never acknowledges is given up on after this
 	// many sends, so one bad heartbeat cannot hold up the rest for ever.
 	maxSendAttempts = 3
+	// How often the runtime is asked what it has loaded, and how soon after
+	// starting it is first asked.
+	defaultInventoryEvery = 15 * time.Minute
+	defaultInventoryDelay = 20 * time.Second
 )
 
 // Agent is the main daemon orchestrator.
@@ -39,9 +43,11 @@ type Agent struct {
 	runtime   adapter.Adapter
 	outbox    *outbox.Outbox
 
-	interval   time.Duration
-	ackTimeout time.Duration
-	ackCheck   time.Duration
+	interval       time.Duration
+	ackTimeout     time.Duration
+	ackCheck       time.Duration
+	inventoryEvery time.Duration
+	inventoryDelay time.Duration
 
 	// The fields below belong to the Run loop alone.
 	connecting bool
@@ -52,21 +58,25 @@ type Agent struct {
 	attempts map[uint64]int
 	// managerProtocol is the protocol version the manager said it understands.
 	managerProtocol int
+	// inventory is waiting to go out with the next heartbeat.
+	inventory *heartbeat.Inventory
 }
 
 func New(cfg *config.Config) *Agent {
 	runtime := openclaw.NewAdapter(cfg.OpenClawPort)
 	return &Agent{
-		cfg:        cfg,
-		client:     ws.NewClient(cfg.Endpoint, cfg.Token),
-		collector:  heartbeat.NewCollector(cfg.InstanceID, runtime),
-		runtime:    runtime,
-		outbox:     outbox.Open(config.OutboxPath(), cfg.BufferCapacity),
-		interval:   time.Duration(cfg.HeartbeatInterval) * time.Second,
-		ackTimeout: defaultAckTimeout,
-		ackCheck:   defaultAckCheck,
-		sent:       map[uint64]time.Time{},
-		attempts:   map[uint64]int{},
+		cfg:            cfg,
+		client:         ws.NewClient(cfg.Endpoint, cfg.Token),
+		collector:      heartbeat.NewCollector(cfg.InstanceID, runtime),
+		runtime:        runtime,
+		outbox:         outbox.Open(config.OutboxPath(), cfg.BufferCapacity),
+		interval:       time.Duration(cfg.HeartbeatInterval) * time.Second,
+		ackTimeout:     defaultAckTimeout,
+		ackCheck:       defaultAckCheck,
+		inventoryEvery: defaultInventoryEvery,
+		inventoryDelay: defaultInventoryDelay,
+		sent:           map[uint64]time.Time{},
+		attempts:       map[uint64]int{},
 	}
 }
 
@@ -86,6 +96,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	defer ticker.Stop()
 	ackTicker := time.NewTicker(a.ackCheck)
 	defer ackTicker.Stop()
+	inventories := a.watchInventory(ctx)
 
 	for {
 		select {
@@ -97,6 +108,10 @@ func (a *Agent) Run(ctx context.Context) error {
 		case <-ticker.C:
 			a.collect(ctx)
 			a.flush(ctx, connected)
+
+		case inventory := <-inventories:
+			a.inventory = &inventory
+			log.Printf("inventory collected (%d skills, %d connections)", len(inventory.Skills), len(inventory.Connections))
 
 		case <-connected:
 			a.connecting = false
@@ -123,6 +138,10 @@ func (a *Agent) Run(ctx context.Context) error {
 // the network.
 func (a *Agent) collect(ctx context.Context) {
 	payload := a.collector.CollectAs(ctx, a.outbox.NextSeq())
+	// The inventory rides on one heartbeat. If that heartbeat is lost, the
+	// next collection replaces it.
+	payload.Inventory = a.inventory
+	a.inventory = nil
 	data, err := json.Marshal(payload)
 	if err != nil {
 		log.Printf("could not encode heartbeat seq=%d: %v", payload.Seq, err)
@@ -134,6 +153,44 @@ func (a *Agent) collect(ctx context.Context) {
 	}
 	log.Printf("heartbeat collected (seq=%d, %s=%s, cpu=%.1f%%, mem=%.1f%%)",
 		payload.Seq, a.runtime.Name(), runtimeState(payload.Report), payload.System.CPUPercent, payload.System.MemoryPercent)
+}
+
+// watchInventory asks the runtime what it has loaded, shortly after starting
+// and then at a slow, steady pace. It runs on the side because the answer can
+// take many seconds, and a heartbeat must never wait for it. The channel is
+// nil, and so never ready, for a runtime that cannot be asked.
+func (a *Agent) watchInventory(ctx context.Context) <-chan heartbeat.Inventory {
+	source, ok := a.runtime.(adapter.Inventorier)
+	if !ok || !a.cfg.Inventory || !adapter.Supports(a.runtime, adapter.CapInventory) {
+		return nil
+	}
+
+	out := make(chan heartbeat.Inventory)
+	go func() {
+		wait := a.inventoryDelay
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(wait):
+			}
+			wait = a.inventoryEvery
+
+			found := source.Inventory(ctx)
+			inventory := heartbeat.Inventory{
+				CollectedAt: time.Now().UTC(),
+				Skills:      found.Skills,
+				Connections: found.Connections,
+				Revision:    found.Revision,
+			}
+			select {
+			case out <- inventory:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return out
 }
 
 // flush sends every heartbeat that is waiting and has not yet been sent on
@@ -259,6 +316,10 @@ func (a *Agent) registration() ws.Registration {
 	hostname, _ := os.Hostname()
 	capabilities := []string{}
 	for _, c := range a.runtime.Capabilities() {
+		// Say only what this copy will in fact report.
+		if c == adapter.CapInventory && !a.cfg.Inventory {
+			continue
+		}
 		capabilities = append(capabilities, string(c))
 	}
 	return ws.Registration{
