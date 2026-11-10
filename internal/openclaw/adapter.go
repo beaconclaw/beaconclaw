@@ -52,11 +52,13 @@ func (a *Adapter) Probe(ctx context.Context) adapter.Report {
 	}
 
 	return adapter.Report{
-		Present: status.Healthy || installed(),
-		Healthy: status.Healthy,
-		Ready:   status.Healthy && status.Ready,
-		Version: version,
-		Raw:     status,
+		Present:  status.Healthy || installed(),
+		Healthy:  status.Healthy,
+		Ready:    status.Healthy && status.Ready,
+		Version:  version,
+		Failing:  status.FailingChannels,
+		UptimeMs: status.UptimeMs,
+		Raw:      status,
 	}
 }
 

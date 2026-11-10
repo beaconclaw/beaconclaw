@@ -18,12 +18,24 @@ const (
 
 // Registration is sent as the first message after connecting.
 type Registration struct {
-	Type       string `json:"type"`
+	Type string `json:"type"`
+	// Protocol is the wire format version this agent speaks.
+	Protocol int    `json:"protocol"`
+	AgentID  string `json:"agent_id"`
+	// InstanceID is the version 1 name for AgentID.
 	InstanceID string `json:"instance_id"`
 	OS         string `json:"os"`
 	Arch       string `json:"arch"`
 	Hostname   string `json:"hostname"`
 	Version    string `json:"version"`
+	// Runtime says which runtime this agent watches and what it can report.
+	Runtime RegistrationRuntime `json:"runtime"`
+}
+
+// RegistrationRuntime describes the runtime adapter in use.
+type RegistrationRuntime struct {
+	Kind         string   `json:"kind"`
+	Capabilities []string `json:"capabilities"`
 }
 
 // Client manages a WebSocket connection to the BeaconClaw manager.
@@ -98,14 +110,16 @@ func (c *Client) SendRegistration(reg Registration) error {
 	return c.SendJSON(reg)
 }
 
-// SendHeartbeat sends a heartbeat payload.
-func (c *Client) SendHeartbeat(payload any) error {
+// SendHeartbeat sends a heartbeat payload, marked with the protocol version.
+func (c *Client) SendHeartbeat(protocol int, payload any) error {
 	wrapper := struct {
-		Type    string `json:"type"`
-		Payload any    `json:"payload"`
+		Type     string `json:"type"`
+		Protocol int    `json:"protocol"`
+		Payload  any    `json:"payload"`
 	}{
-		Type:    "heartbeat",
-		Payload: payload,
+		Type:     "heartbeat",
+		Protocol: protocol,
+		Payload:  payload,
 	}
 	return c.SendJSON(wrapper)
 }

@@ -75,7 +75,7 @@ func (a *Agent) tick(ctx context.Context) {
 	if buffered := a.buf.Drain(); len(buffered) > 0 {
 		log.Printf("flushing %d buffered heartbeats", len(buffered))
 		for _, p := range buffered {
-			if err := a.client.SendHeartbeat(p); err != nil {
+			if err := a.client.SendHeartbeat(heartbeat.ProtocolVersion, p); err != nil {
 				log.Printf("flush error: %v", err)
 				a.buf.Push(payload)
 				a.handleDisconnect()
@@ -84,7 +84,7 @@ func (a *Agent) tick(ctx context.Context) {
 		}
 	}
 
-	if err := a.client.SendHeartbeat(payload); err != nil {
+	if err := a.client.SendHeartbeat(heartbeat.ProtocolVersion, payload); err != nil {
 		log.Printf("heartbeat send error: %v", err)
 		a.buf.Push(payload)
 		a.handleDisconnect()
@@ -121,8 +121,15 @@ func (a *Agent) connectWithRetry(ctx context.Context) {
 
 		// Send registration
 		hostname, _ := os.Hostname()
+		capabilities := []string{}
+		for _, c := range a.runtime.Capabilities() {
+			capabilities = append(capabilities, string(c))
+		}
 		reg := ws.Registration{
+			Protocol:   heartbeat.ProtocolVersion,
+			AgentID:    a.cfg.InstanceID,
 			InstanceID: a.cfg.InstanceID,
+			Runtime:    ws.RegistrationRuntime{Kind: a.runtime.Name(), Capabilities: capabilities},
 			OS:         runtime.GOOS,
 			Arch:       runtime.GOARCH,
 			Hostname:   hostname,

@@ -82,6 +82,9 @@ func TestClientSendRegistration(t *testing.T) {
 	defer c.Close()
 
 	reg := Registration{
+		Protocol:   2,
+		AgentID:    "inst-123",
+		Runtime:    RegistrationRuntime{Kind: "openclaw", Capabilities: []string{"health"}},
 		InstanceID: "inst-123",
 		OS:         "linux",
 		Arch:       "amd64",
@@ -94,15 +97,22 @@ func TestClientSendRegistration(t *testing.T) {
 
 	msg := <-received
 
-	var parsed map[string]string
+	var parsed map[string]any
 	if err := json.Unmarshal(msg, &parsed); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	if parsed["type"] != "register" {
-		t.Errorf("expected type=register, got %s", parsed["type"])
+		t.Errorf("expected type=register, got %v", parsed["type"])
 	}
-	if parsed["instance_id"] != "inst-123" {
-		t.Errorf("expected instance_id=inst-123, got %s", parsed["instance_id"])
+	if parsed["instance_id"] != "inst-123" || parsed["agent_id"] != "inst-123" {
+		t.Errorf("expected both ID names to be inst-123, got instance_id=%v agent_id=%v", parsed["instance_id"], parsed["agent_id"])
+	}
+	if parsed["protocol"] != float64(2) {
+		t.Errorf("expected protocol=2, got %v", parsed["protocol"])
+	}
+	runtime, _ := parsed["runtime"].(map[string]any)
+	if runtime["kind"] != "openclaw" {
+		t.Errorf("expected runtime.kind=openclaw, got %v", runtime["kind"])
 	}
 }
 
@@ -130,7 +140,7 @@ func TestClientSendHeartbeat(t *testing.T) {
 	defer c.Close()
 
 	payload := map[string]any{"seq": 1, "cpu": 42.5}
-	if err := c.SendHeartbeat(payload); err != nil {
+	if err := c.SendHeartbeat(2, payload); err != nil {
 		t.Fatalf("send heartbeat: %v", err)
 	}
 

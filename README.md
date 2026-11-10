@@ -27,8 +27,10 @@ Outbound-only means nothing connects in to your machine. It does not mean no dat
 | Identity | Agent ID, timestamp, sequence number |
 | Host | Hostname, operating system, architecture |
 | System metrics | CPU percent; memory total, used and percent; root disk total, used and percent |
-| OpenClaw gateway | Healthy, ready, names of failing channels, uptime, gateway port, OpenClaw version |
-| Agent | BeaconClaw agent version (sent once per connection) |
+| Runtime (OpenClaw gateway) | Which runtime it is; whether it is present, healthy and ready; names of failing channels; uptime; gateway port; runtime version |
+| Agent | BeaconClaw agent version, protocol version, and what the runtime adapter can report (sent once per connection) |
+
+The runtime's state is sent twice in each heartbeat: once in a form that fits any runtime, and once in the original OpenClaw-named form, so that a manager on either protocol version understands it. Both carry the same facts.
 
 What it does not do, as of this version:
 
