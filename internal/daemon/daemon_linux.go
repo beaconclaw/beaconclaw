@@ -9,20 +9,22 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/beaconclaw/beaconclaw/internal/profile"
 )
 
-const (
-	serviceName = "beaconclaw.service"
-)
+// serviceName is beaconclaw.service, or beaconclaw-<profile>.service.
+func serviceName() string {
+	return "beaconclaw" + profile.Suffix() + ".service"
+}
 
 func unitPath() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "systemd", "user", serviceName)
+	return filepath.Join(home, ".config", "systemd", "user", serviceName())
 }
 
 func logDir() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".beaconclaw", "logs")
+	return filepath.Join(profile.StateDir(), "logs")
 }
 
 func buildUnit(execPath string) string {
@@ -33,14 +35,14 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=%s --_daemon
+ExecStart=%s %s
 Environment="PATH=%s"
 Restart=on-failure
 RestartSec=5
 
 [Install]
 WantedBy=default.target
-`, execPath, os.Getenv("PATH"))
+`, execPath, strings.Join(daemonArgs(), " "), os.Getenv("PATH"))
 }
 
 func systemctl(args ...string) ([]byte, error) {
@@ -68,10 +70,10 @@ func install(execPath string) error {
 	if out, err := systemctl("daemon-reload"); err != nil {
 		return fmt.Errorf("daemon-reload: %s: %w", strings.TrimSpace(string(out)), err)
 	}
-	if out, err := systemctl("enable", serviceName); err != nil {
+	if out, err := systemctl("enable", serviceName()); err != nil {
 		return fmt.Errorf("enable: %s: %w", strings.TrimSpace(string(out)), err)
 	}
-	if out, err := systemctl("restart", serviceName); err != nil {
+	if out, err := systemctl("restart", serviceName()); err != nil {
 		return fmt.Errorf("restart: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 
@@ -84,7 +86,7 @@ func uninstall() error {
 	}
 
 	// Disable and stop in one call
-	systemctl("disable", "--now", serviceName)
+	systemctl("disable", "--now", serviceName())
 
 	// Remove unit file
 	if err := os.Remove(unitPath()); err != nil && !os.IsNotExist(err) {
@@ -101,14 +103,14 @@ func start() error {
 	if !isInstalled() {
 		return fmt.Errorf("service not installed. Run 'beaconclaw install' first")
 	}
-	if out, err := systemctl("start", serviceName); err != nil {
+	if out, err := systemctl("start", serviceName()); err != nil {
 		return fmt.Errorf("start: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 	return nil
 }
 
 func stop() error {
-	if out, err := systemctl("stop", serviceName); err != nil {
+	if out, err := systemctl("stop", serviceName()); err != nil {
 		return fmt.Errorf("stop: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 	return nil
@@ -118,7 +120,7 @@ func restart() error {
 	if !isInstalled() {
 		return fmt.Errorf("service not installed. Run 'beaconclaw install' first")
 	}
-	if out, err := systemctl("restart", serviceName); err != nil {
+	if out, err := systemctl("restart", serviceName()); err != nil {
 		return fmt.Errorf("restart: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 	return nil
@@ -135,7 +137,7 @@ func getStatus() Status {
 		return s
 	}
 
-	out, err := systemctl("show", serviceName, "--no-page",
+	out, err := systemctl("show", serviceName(), "--no-page",
 		"--property=ActiveState,SubState,MainPID")
 	if err != nil {
 		return s

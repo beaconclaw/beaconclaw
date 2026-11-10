@@ -3,7 +3,7 @@ LDFLAGS := -ldflags "-s -w -X github.com/beaconclaw/beaconclaw/internal/agent.Ve
 BINARY := beaconclaw
 BUILD_DIR := bin
 
-.PHONY: build test lint clean cross-compile install
+.PHONY: build test lint clean cross-compile checksums install
 
 build:
 	go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY) ./cmd/beaconclaw
@@ -29,3 +29,9 @@ cross-compile:
 	GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY)-darwin-arm64 ./cmd/beaconclaw
 	GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY)-windows-amd64.exe ./cmd/beaconclaw
 	GOOS=windows GOARCH=arm64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY)-windows-arm64.exe ./cmd/beaconclaw
+
+# Write bin/checksums.txt for the cross-compiled binaries, in sha256sum format.
+# The installer and `beaconclaw update` verify downloads against this file.
+checksums:
+	cd $(BUILD_DIR) && rm -f checksums.txt && \
+		(sha256sum $(BINARY)-*-* 2>/dev/null || shasum -a 256 $(BINARY)-*-*) > checksums.txt

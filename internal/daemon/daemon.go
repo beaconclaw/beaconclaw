@@ -1,5 +1,18 @@
 package daemon
 
+import "github.com/beaconclaw/beaconclaw/internal/profile"
+
+// daemonArgs returns the arguments the service manager passes to the binary.
+// A named profile is passed explicitly so the service does not depend on the
+// binary's file name.
+func daemonArgs() []string {
+	args := []string{"--_daemon"}
+	if name := profile.Name(); name != "" {
+		args = append(args, "--profile", name)
+	}
+	return args
+}
+
 // Status represents the current state of the daemon service.
 type Status struct {
 	Installed bool

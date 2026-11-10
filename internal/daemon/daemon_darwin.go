@@ -9,20 +9,25 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/beaconclaw/beaconclaw/internal/profile"
 )
 
-const (
-	label = "ai.beaconclaw.agent"
-)
+// serviceLabel is ai.beaconclaw.agent, or ai.beaconclaw.agent.<profile>.
+func serviceLabel() string {
+	if name := profile.Name(); name != "" {
+		return "ai.beaconclaw.agent." + name
+	}
+	return "ai.beaconclaw.agent"
+}
 
 func plistPath() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, "Library", "LaunchAgents", label+".plist")
+	return filepath.Join(home, "Library", "LaunchAgents", serviceLabel()+".plist")
 }
 
 func logDir() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".beaconclaw", "logs")
+	return filepath.Join(profile.StateDir(), "logs")
 }
 
 func uid() string {
@@ -35,6 +40,10 @@ func domain() string {
 
 func buildPlist(execPath string) string {
 	logs := logDir()
+	var args strings.Builder
+	for _, a := range daemonArgs() {
+		args.WriteString("    <string>" + a + "</string>\n")
+	}
 	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -44,8 +53,7 @@ func buildPlist(execPath string) string {
   <key>ProgramArguments</key>
   <array>
     <string>%s</string>
-    <string>--_daemon</string>
-  </array>
+%s  </array>
   <key>StandardOutPath</key>
   <string>%s/agent.log</string>
   <key>StandardErrorPath</key>
@@ -59,7 +67,7 @@ func buildPlist(execPath string) string {
   </dict>
 </dict>
 </plist>
-`, label, execPath, logs, logs)
+`, serviceLabel(), execPath, args.String(), logs, logs)
 }
 
 func install(execPath string) error {
@@ -76,7 +84,7 @@ func install(execPath string) error {
 
 	// Unload existing service if present (ignore errors)
 	if isInstalled() {
-		exec.Command("launchctl", "bootout", domain()+"/"+label).Run()
+		exec.Command("launchctl", "bootout", domain()+"/"+serviceLabel()).Run()
 	}
 
 	// Write plist
@@ -98,7 +106,7 @@ func uninstall() error {
 	}
 
 	// Bootout (stop + unload)
-	exec.Command("launchctl", "bootout", domain()+"/"+label).Run()
+	exec.Command("launchctl", "bootout", domain()+"/"+serviceLabel()).Run()
 
 	// Remove plist
 	if err := os.Remove(plistPath()); err != nil && !os.IsNotExist(err) {
@@ -112,7 +120,7 @@ func start() error {
 	if !isInstalled() {
 		return fmt.Errorf("service not installed. Run 'beaconclaw install' first")
 	}
-	out, err := exec.Command("launchctl", "kickstart", domain()+"/"+label).CombinedOutput()
+	out, err := exec.Command("launchctl", "kickstart", domain()+"/"+serviceLabel()).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("launchctl kickstart: %s: %w", strings.TrimSpace(string(out)), err)
 	}
@@ -120,7 +128,7 @@ func start() error {
 }
 
 func stop() error {
-	out, err := exec.Command("launchctl", "bootout", domain()+"/"+label).CombinedOutput()
+	out, err := exec.Command("launchctl", "bootout", domain()+"/"+serviceLabel()).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("launchctl bootout: %s: %w", strings.TrimSpace(string(out)), err)
 	}
@@ -133,7 +141,7 @@ func restart() error {
 	if !isInstalled() {
 		return fmt.Errorf("service not installed. Run 'beaconclaw install' first")
 	}
-	out, err := exec.Command("launchctl", "kickstart", "-k", domain()+"/"+label).CombinedOutput()
+	out, err := exec.Command("launchctl", "kickstart", "-k", domain()+"/"+serviceLabel()).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("launchctl kickstart: %s: %w", strings.TrimSpace(string(out)), err)
 	}
@@ -151,7 +159,7 @@ func getStatus() Status {
 		return s
 	}
 
-	out, err := exec.Command("launchctl", "print", domain()+"/"+label).CombinedOutput()
+	out, err := exec.Command("launchctl", "print", domain()+"/"+serviceLabel()).CombinedOutput()
 	if err != nil {
 		return s
 	}

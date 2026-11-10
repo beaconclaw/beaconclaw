@@ -1,5 +1,10 @@
 name: Release
 
+# Tags decide the release track:
+#   v0.1.0          stable: an official release, marked "latest"
+#   v0.1.0-beta.1   beta: a pre-release, never marked "latest"
+# The installer and `beaconclaw update` only pick a pre-release when asked to.
+
 on:
   push:
     tags:
@@ -14,6 +19,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Classify the tag
+        id: tag
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "make_latest=true" >> "$GITHUB_OUTPUT"
+          elif [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-(alpha|beta|rc)\.[0-9]+$ ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "make_latest=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Tag '$tag' is neither a stable version (v0.1.0) nor a pre-release (v0.1.0-beta.1)."
+            exit 1
+          fi
+
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -22,12 +42,17 @@ jobs:
         run: go test ./...
 
       - name: Build binaries
-        run: make cross-compile
+        run: make cross-compile VERSION="${GITHUB_REF_NAME}"
+
+      - name: Write checksums
+        run: make checksums && cat bin/checksums.txt
 
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          prerelease: ${{ steps.tag.outputs.prerelease }}
+          make_latest: ${{ steps.tag.outputs.make_latest }}
           files: |
             bin/beaconclaw-linux-amd64
             bin/beaconclaw-linux-arm64
@@ -35,3 +60,21 @@ jobs:
             bin/beaconclaw-darwin-arm64
             bin/beaconclaw-windows-amd64.exe
             bin/beaconclaw-windows-arm64.exe
+            bin/checksums.txt
+
+      # A default install follows "latest". Prove a pre-release never becomes it.
+      - name: Check that "latest" is a stable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          latest=$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq '.tag_name + " " + (.prerelease|tostring)')
+          echo "latest: $latest"
+          tag="${latest% *}"
+          if [[ "$tag" == *-* || "${latest#* }" != "false" ]]; then
+            echo "::error::The latest release is '$tag', which is a pre-release."
+            exit 1
+          fi
+          if [[ "${{ steps.tag.outputs.prerelease }}" == "true" && "$tag" == "${GITHUB_REF_NAME}" ]]; then
+            echo "::error::Pre-release ${GITHUB_REF_NAME} was marked latest."
+            exit 1
+          fi
