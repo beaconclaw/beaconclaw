@@ -13,11 +13,13 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/beaconclaw/beaconclaw/internal/profile"
+
+	"github.com/beaconclaw/beaconclaw/internal/openclaw"
 )
 
 const (
 	DefaultManagerEndpoint = "wss://api.beaconclaw.ai/ws"
-	DefaultOpenClawPort    = 18789
+	DefaultOpenClawPort    = openclaw.DefaultPort
 	DefaultHeartbeatSec    = 30
 	DefaultBufferCapacity  = 100
 
@@ -25,10 +27,8 @@ const (
 	ChannelStable = "stable"
 	ChannelBeta   = "beta"
 
-	instanceIDFile   = "instance-id"
-	configFile       = "config.json"
-	openclawStateDir = ".openclaw"
-	openclawConfig   = "openclaw.json"
+	instanceIDFile = "instance-id"
+	configFile     = "config.json"
 )
 
 type Config struct {
@@ -74,8 +74,8 @@ func Load() (*Config, error) {
 		}
 	}
 
-	// Auto-detect OpenClaw port from its config
-	if port := detectOpenClawPort(); port > 0 {
+	// Ask the runtime's adapter where the runtime listens.
+	if port := openclaw.DetectPort(); port > 0 {
 		cfg.OpenClawPort = port
 	}
 
@@ -253,50 +253,6 @@ func loadFileConfig() (*fileConfig, error) {
 		return nil, err
 	}
 	return &fc, nil
-}
-
-func detectOpenClawPort() int {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return 0
-	}
-
-	// Try ~/.openclaw/openclaw.json
-	candidates := []string{
-		filepath.Join(home, openclawStateDir, openclawConfig),
-	}
-
-	// Also check legacy dirs
-	for _, legacy := range []string{".clawdbot", ".moldbot"} {
-		candidates = append(candidates, filepath.Join(home, legacy, openclawConfig))
-		candidates = append(candidates, filepath.Join(home, legacy, "clawdbot.json"))
-	}
-
-	for _, path := range candidates {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-		var raw map[string]json.RawMessage
-		if err := json.Unmarshal(data, &raw); err != nil {
-			continue
-		}
-		gatewayRaw, ok := raw["gateway"]
-		if !ok {
-			continue
-		}
-		var gateway struct {
-			Port int `json:"port"`
-		}
-		if err := json.Unmarshal(gatewayRaw, &gateway); err != nil {
-			continue
-		}
-		if gateway.Port > 0 {
-			return gateway.Port
-		}
-	}
-
-	return 0
 }
 
 func loadOrCreateInstanceID() (string, error) {

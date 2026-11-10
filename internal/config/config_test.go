@@ -89,16 +89,6 @@ func TestValidate(t *testing.T) {
 	}
 }
 
-func TestDetectOpenClawPortDefault(t *testing.T) {
-	// When no OpenClaw config exists, should return 0 (fallback to default)
-	port := detectOpenClawPort()
-	// This may or may not find a config depending on the test environment
-	// Just ensure it doesn't panic and returns a valid value
-	if port < 0 {
-		t.Errorf("detectOpenClawPort returned negative: %d", port)
-	}
-}
-
 func TestSaveEndpointAndChannelKeepOtherSettings(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("BEACONCLAW_TOKEN", "")

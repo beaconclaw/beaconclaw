@@ -226,11 +226,12 @@ ssh user@your-vm 'chmod +x ~/.local/bin/beaconclaw && beaconclaw restart'
 ```
 cmd/beaconclaw/      CLI entrypoint
 internal/
+  adapter/           The boundary between the agent and the runtime it watches
   agent/             Daemon orchestrator
   buffer/            Ring buffer for offline heartbeats
   config/            Config loading and validation
   heartbeat/         Payload assembly and system metrics
-  openclaw/          HTTP health probes and version detection
+  openclaw/          The OpenClaw adapter: health probes, version and port lookup
   profile/           Named profiles: separate copies on one machine
   update/            Release lookup, checksum verification, binary replacement
   ws/                WebSocket client and reconnection
