@@ -35,8 +35,8 @@ func TestCollectorSequence(t *testing.T) {
 	parts := strings.Split(srv.URL, ":")
 	port, _ := strconv.Atoi(parts[len(parts)-1])
 
-	prober := openclaw.NewProber(port)
-	c := NewCollector("test-instance-id", prober)
+	runtime := openclaw.NewAdapter(port)
+	c := NewCollector("test-instance-id", runtime)
 
 	p1 := c.Collect(context.Background())
 	p2 := c.Collect(context.Background())
@@ -56,8 +56,8 @@ func TestCollectorInstanceID(t *testing.T) {
 	parts := strings.Split(srv.URL, ":")
 	port, _ := strconv.Atoi(parts[len(parts)-1])
 
-	prober := openclaw.NewProber(port)
-	c := NewCollector("my-instance", prober)
+	runtime := openclaw.NewAdapter(port)
+	c := NewCollector("my-instance", runtime)
 
 	p := c.Collect(context.Background())
 
@@ -73,8 +73,8 @@ func TestCollectorTimestamp(t *testing.T) {
 	parts := strings.Split(srv.URL, ":")
 	port, _ := strconv.Atoi(parts[len(parts)-1])
 
-	prober := openclaw.NewProber(port)
-	c := NewCollector("test", prober)
+	runtime := openclaw.NewAdapter(port)
+	c := NewCollector("test", runtime)
 
 	p := c.Collect(context.Background())
 
@@ -90,15 +90,22 @@ func TestCollectorOpenClawStatus(t *testing.T) {
 	parts := strings.Split(srv.URL, ":")
 	port, _ := strconv.Atoi(parts[len(parts)-1])
 
-	prober := openclaw.NewProber(port)
-	c := NewCollector("test", prober)
+	runtime := openclaw.NewAdapter(port)
+	c := NewCollector("test", runtime)
 
 	p := c.Collect(context.Background())
 
-	if p.OpenClaw.State != "online" {
-		t.Errorf("expected openclaw online, got %s", p.OpenClaw.State)
+	status, ok := p.Runtime.(openclaw.Status)
+	if !ok {
+		t.Fatalf("expected the adapter's own status as the runtime data, got %T", p.Runtime)
 	}
-	if !p.OpenClaw.Healthy {
+	if status.State != "online" {
+		t.Errorf("expected openclaw online, got %s", status.State)
+	}
+	if !p.Report.Healthy || !p.Report.Ready || !p.Report.Present {
+		t.Errorf("expected a present, healthy, ready report, got %+v", p.Report)
+	}
+	if !status.Healthy {
 		t.Error("expected openclaw healthy")
 	}
 }
@@ -110,8 +117,8 @@ func TestCollectorPayloadJSON(t *testing.T) {
 	parts := strings.Split(srv.URL, ":")
 	port, _ := strconv.Atoi(parts[len(parts)-1])
 
-	prober := openclaw.NewProber(port)
-	c := NewCollector("test", prober)
+	runtime := openclaw.NewAdapter(port)
+	c := NewCollector("test", runtime)
 
 	p := c.Collect(context.Background())
 

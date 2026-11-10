@@ -241,18 +241,25 @@ func statusCmd() *cobra.Command {
 			}
 			fmt.Println()
 
-			prober := openclaw.NewProber(cfg.OpenClawPort)
-			status := prober.Probe(context.Background())
+			runtime := openclaw.NewAdapter(cfg.OpenClawPort)
+			report := runtime.Probe(context.Background())
 
-			fmt.Printf("Status:       %s\n", status.State)
-			if status.Version != "unknown" {
-				fmt.Printf("OC Version:   %s\n", status.Version)
+			// The lines below keep their original wording. The detail lines come
+			// from the adapter's own data.
+			if status, ok := report.Raw.(openclaw.Status); ok {
+				fmt.Printf("Status:       %s\n", status.State)
+				if report.Version != "" {
+					fmt.Printf("OC Version:   %s\n", report.Version)
+				}
+				if status.UptimeMs > 0 {
+					fmt.Printf("Uptime:       %s\n", formatDuration(status.UptimeMs))
+				}
+				if len(status.FailingChannels) > 0 {
+					fmt.Printf("Failing:      %v\n", status.FailingChannels)
+				}
 			}
-			if status.UptimeMs > 0 {
-				fmt.Printf("Uptime:       %s\n", formatDuration(status.UptimeMs))
-			}
-			if len(status.FailingChannels) > 0 {
-				fmt.Printf("Failing:      %v\n", status.FailingChannels)
+			if !report.Present {
+				fmt.Printf("Note:         %s was not found on this machine\n", runtime.Name())
 			}
 
 			return nil

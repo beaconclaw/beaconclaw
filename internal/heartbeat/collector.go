@@ -11,16 +11,16 @@ import (
 
 // SystemMetrics contains host-level resource usage.
 type SystemMetrics struct {
-	CPUPercent      float64 `json:"cpu_percent"`
-	MemoryPercent   float64 `json:"memory_percent"`
-	MemoryTotalBytes uint64 `json:"memory_total_bytes"`
-	MemoryUsedBytes  uint64 `json:"memory_used_bytes"`
-	DiskPercent     float64 `json:"disk_percent"`
-	DiskTotalBytes  uint64  `json:"disk_total_bytes"`
-	DiskUsedBytes   uint64  `json:"disk_used_bytes"`
-	OS              string  `json:"os"`
-	Arch            string  `json:"arch"`
-	Hostname        string  `json:"hostname"`
+	CPUPercent       float64 `json:"cpu_percent"`
+	MemoryPercent    float64 `json:"memory_percent"`
+	MemoryTotalBytes uint64  `json:"memory_total_bytes"`
+	MemoryUsedBytes  uint64  `json:"memory_used_bytes"`
+	DiskPercent      float64 `json:"disk_percent"`
+	DiskTotalBytes   uint64  `json:"disk_total_bytes"`
+	DiskUsedBytes    uint64  `json:"disk_used_bytes"`
+	OS               string  `json:"os"`
+	Arch             string  `json:"arch"`
+	Hostname         string  `json:"hostname"`
 }
 
 // CollectSystemMetrics gathers current CPU, memory, and disk stats.

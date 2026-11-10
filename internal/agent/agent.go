@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/beaconclaw/beaconclaw/internal/adapter"
 	"github.com/beaconclaw/beaconclaw/internal/buffer"
 	"github.com/beaconclaw/beaconclaw/internal/config"
 	"github.com/beaconclaw/beaconclaw/internal/heartbeat"
@@ -19,16 +20,18 @@ type Agent struct {
 	cfg       *config.Config
 	client    *ws.Client
 	collector *heartbeat.Collector
+	runtime   adapter.Adapter
 	buf       *buffer.Ring[heartbeat.Payload]
 	backoff   *ws.Backoff
 }
 
 func New(cfg *config.Config) *Agent {
-	prober := openclaw.NewProber(cfg.OpenClawPort)
+	runtime := openclaw.NewAdapter(cfg.OpenClawPort)
 	return &Agent{
 		cfg:       cfg,
 		client:    ws.NewClient(cfg.Endpoint, cfg.Token),
-		collector: heartbeat.NewCollector(cfg.InstanceID, prober),
+		collector: heartbeat.NewCollector(cfg.InstanceID, runtime),
+		runtime:   runtime,
 		buf:       buffer.New[heartbeat.Payload](cfg.BufferCapacity),
 		backoff:   ws.NewBackoff(),
 	}
@@ -38,7 +41,7 @@ func New(cfg *config.Config) *Agent {
 func (a *Agent) Run(ctx context.Context) error {
 	log.Printf("beaconclaw agent starting (agent=%s)", a.cfg.InstanceID)
 	log.Printf("manager endpoint: %s", a.cfg.Endpoint)
-	log.Printf("openclaw gateway: http://127.0.0.1:%d", a.cfg.OpenClawPort)
+	log.Printf("%s gateway: %s", a.runtime.Name(), a.runtime.Target())
 
 	// Initial connection
 	a.connectWithRetry(ctx)
@@ -88,8 +91,8 @@ func (a *Agent) tick(ctx context.Context) {
 		return
 	}
 
-	log.Printf("heartbeat sent (seq=%d, openclaw=%s, cpu=%.1f%%, mem=%.1f%%)",
-		payload.Seq, payload.OpenClaw.State, payload.System.CPUPercent, payload.System.MemoryPercent)
+	log.Printf("heartbeat sent (seq=%d, %s=%s, cpu=%.1f%%, mem=%.1f%%)",
+		payload.Seq, a.runtime.Name(), runtimeState(payload.Report), payload.System.CPUPercent, payload.System.MemoryPercent)
 }
 
 func (a *Agent) connectWithRetry(ctx context.Context) {
@@ -147,4 +150,16 @@ func (a *Agent) Status() string {
 		return "connected"
 	}
 	return "disconnected"
+}
+
+// runtimeState puts a report in one word for the log.
+func runtimeState(r adapter.Report) string {
+	switch {
+	case !r.Healthy:
+		return "offline"
+	case !r.Ready:
+		return "degraded"
+	default:
+		return "online"
+	}
 }
