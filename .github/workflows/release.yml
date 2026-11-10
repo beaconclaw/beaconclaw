@@ -71,6 +71,10 @@ jobs:
   publish:
     needs: build
     runs-on: ubuntu-latest
+    # An official release waits here for the maintainer's approval: the
+    # "release" environment has a required reviewer. A pre-release publishes
+    # without waiting. Both environments accept version tags only.
+    environment: ${{ needs.build.outputs.prerelease == 'true' && 'release-beta' || 'release' }}
     permissions:
       contents: write
     steps:

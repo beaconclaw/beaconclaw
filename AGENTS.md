@@ -31,6 +31,8 @@ Describe a change by what it does and why, in terms a stranger can follow.
 | `beta` | `v0.1.0-beta.1` | Pre-releases, for testing. |
 | `stable` | `v0.1.0` | Only with the maintainer's explicit sign-off. |
 
+The repository enforces this: `main` changes only through a pull request with passing tests, version tags cannot be moved or deleted, and the release workflow holds an official release for the maintainer's approval. Do not weaken those rules.
+
 A stable tag is a production release: installers and `update` hand it to every copy on the default track. Never push a stable tag as part of routine work. The release workflow marks hyphenated tags as pre-releases and checks that "latest" stays stable; do not weaken that check.
 
 ## Commands
