@@ -15,6 +15,7 @@ import (
 	"github.com/beaconclaw/beaconclaw/internal/agent"
 	"github.com/beaconclaw/beaconclaw/internal/config"
 	"github.com/beaconclaw/beaconclaw/internal/daemon"
+	"github.com/beaconclaw/beaconclaw/internal/maintenance"
 	"github.com/beaconclaw/beaconclaw/internal/openclaw"
 	"github.com/beaconclaw/beaconclaw/internal/profile"
 	"github.com/beaconclaw/beaconclaw/internal/update"
@@ -59,6 +60,7 @@ func main() {
 	root.AddCommand(stopCmd())
 	root.AddCommand(restartCmd())
 	root.AddCommand(statusCmd())
+	root.AddCommand(maintenanceCmd())
 	root.AddCommand(updateCmd())
 	root.AddCommand(channelCmd())
 	root.AddCommand(versionCmd())
@@ -211,6 +213,79 @@ func restartCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// maintenanceCmd tells the manager this agent is being worked on. It uses the
+// agent's own token, so it can only ever affect this agent.
+func maintenanceCmd() *cobra.Command {
+	client := func() (*maintenance.Client, error) {
+		cfg, err := config.Load()
+		if err != nil {
+			return nil, fmt.Errorf("load config: %w", err)
+		}
+		if err := config.Validate(cfg); err != nil {
+			return nil, err
+		}
+		return maintenance.NewClient(cfg.Endpoint, cfg.Token, agent.Version)
+	}
+
+	cmd := &cobra.Command{
+		Use:   "maintenance",
+		Short: "Tell the manager this agent is being worked on",
+		Long: "While an agent is in maintenance the manager holds back its alerts and leaves\n" +
+			"the time out of its uptime. Start it before working on the agent and end it after.",
+	}
+
+	var reason string
+	var length time.Duration
+	start := &cobra.Command{
+		Use:     "start",
+		Short:   "Put this agent into maintenance from now",
+		Example: "  beaconclaw maintenance start --reason \"runtime upgrade\" --for 2h",
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := client()
+			if err != nil {
+				return err
+			}
+			window, err := c.Start(cmd.Context(), reason, length)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("In maintenance until %s (%s from now).\n",
+				window.EndsAt.Local().Format("15:04 on 2 Jan"), time.Until(window.EndsAt).Round(time.Minute))
+			fmt.Println("Run 'beaconclaw maintenance end' when the work is done.")
+			return nil
+		},
+	}
+	start.Flags().StringVar(&reason, "reason", "", "what the work is (required)")
+	start.Flags().DurationVar(&length, "for", maintenance.DefaultFor, "how long it will take, such as 30m or 2h")
+	start.MarkFlagRequired("reason")
+
+	end := &cobra.Command{
+		Use:   "end",
+		Short: "Take this agent out of maintenance now",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := client()
+			if err != nil {
+				return err
+			}
+			ended, err := c.End(cmd.Context())
+			if err != nil {
+				return err
+			}
+			if ended {
+				fmt.Println("Maintenance ended.")
+			} else {
+				fmt.Println("This agent was not in maintenance.")
+			}
+			return nil
+		},
+	}
+
+	cmd.AddCommand(start, end)
+	return cmd
 }
 
 func statusCmd() *cobra.Command {
