@@ -36,7 +36,7 @@ What it does not do, as of this version:
 
 - It does not read or send conversations, sessions, messages, prompts, logs, files, credentials or usage data.
 - It reads `~/.openclaw/openclaw.json` only to find the gateway port. If that file is missing it looks for the same setting in the older `~/.clawdbot/` and `~/.moldbot/` folders.
-- It runs `openclaw --version` to learn the OpenClaw version, and nothing else.
+- To learn the OpenClaw version it looks for the running gateway among the machine's processes, by command line, and reads the `name` and `version` fields of that copy's `package.json`. Command lines of other processes are not kept or sent. If that finds nothing, it follows the `openclaw` command to its package and reads the same two fields, and as a last resort runs `openclaw --version`.
 - It cannot receive or run commands from the manager.
 - It opens no listening ports.
 
