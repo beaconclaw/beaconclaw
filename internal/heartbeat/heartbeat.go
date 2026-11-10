@@ -7,15 +7,39 @@ import (
 	"github.com/beaconclaw/beaconclaw/internal/adapter"
 )
 
+// ProtocolVersion is the version of the wire format this agent speaks.
+//
+// Version 2 describes the runtime in terms that fit any runtime, under
+// "runtime". The version 1 fields ("instance_id" and "openclaw") are still
+// sent beside it, so a manager that only knows version 1 keeps working.
+const ProtocolVersion = 2
+
+// Runtime is the runtime's health in terms that fit any runtime.
+type Runtime struct {
+	// Kind names the runtime, such as "openclaw".
+	Kind    string `json:"kind"`
+	Present bool   `json:"present"`
+	Healthy bool   `json:"healthy"`
+	Ready   bool   `json:"ready"`
+	Version string `json:"version,omitempty"`
+	// Failing names the parts of the runtime that are not working.
+	Failing  []string `json:"failing"`
+	UptimeMs int64    `json:"uptime_ms,omitempty"`
+	// Raw is the adapter's own data, unchanged.
+	Raw any `json:"raw,omitempty"`
+}
+
 // Payload is the data sent to the BeaconClaw manager every heartbeat interval.
 type Payload struct {
+	AgentID string `json:"agent_id"`
+	// InstanceID is the version 1 name for AgentID.
 	InstanceID string        `json:"instance_id"`
 	Timestamp  time.Time     `json:"timestamp"`
 	Seq        uint64        `json:"seq"`
 	System     SystemMetrics `json:"system"`
-	// Runtime is the adapter's own data. It is sent under the name installed
-	// managers expect.
-	Runtime any `json:"openclaw"`
+	Runtime    Runtime       `json:"runtime"`
+	// Legacy is the adapter's own data under the name version 1 managers read.
+	Legacy any `json:"openclaw"`
 	// Report is the neutral reading of the same probe. It is for the agent's
 	// own use and is not sent.
 	Report adapter.Report `json:"-"`
@@ -40,12 +64,27 @@ func NewCollector(instanceID string, runtime adapter.Adapter) *Collector {
 func (c *Collector) Collect(ctx context.Context) Payload {
 	c.seq++
 	report := c.runtime.Probe(ctx)
+	failing := report.Failing
+	if failing == nil {
+		failing = []string{}
+	}
 	return Payload{
+		AgentID:    c.instanceID,
 		InstanceID: c.instanceID,
 		Timestamp:  time.Now().UTC(),
 		Seq:        c.seq,
 		System:     CollectSystemMetrics(),
-		Runtime:    report.Raw,
-		Report:     report,
+		Runtime: Runtime{
+			Kind:     c.runtime.Name(),
+			Present:  report.Present,
+			Healthy:  report.Healthy,
+			Ready:    report.Ready,
+			Version:  report.Version,
+			Failing:  failing,
+			UptimeMs: report.UptimeMs,
+			Raw:      report.Raw,
+		},
+		Legacy: report.Raw,
+		Report: report,
 	}
 }

@@ -35,6 +35,12 @@ type Report struct {
 	Ready bool
 	// Version is the runtime's version, or "" when it is not known.
 	Version string
+	// Failing names the parts of the runtime that are not working, for an
+	// adapter with CapChannels.
+	Failing []string
+	// UptimeMs is how long the runtime has been up, for an adapter with
+	// CapUptime. Zero when it is not known.
+	UptimeMs int64
 	// Raw is the adapter's own data, passed through unchanged. Its shape
 	// belongs to the adapter.
 	Raw any
