@@ -72,3 +72,35 @@ func TestDetectOpenClawPortDefault(t *testing.T) {
 		t.Errorf("detectOpenClawPort returned negative: %d", port)
 	}
 }
+
+func TestSaveEndpointAndChannelKeepOtherSettings(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("BEACONCLAW_TOKEN", "")
+	t.Setenv("BEACONCLAW_ENDPOINT", "")
+
+	if err := SaveToken("bc_test123"); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{"", "api.example.com", "https://api.example.com/ws", "wss://"} {
+		if err := SaveEndpoint(bad); err == nil {
+			t.Errorf("SaveEndpoint(%q) should fail", bad)
+		}
+	}
+	if err := SaveEndpoint("wss://api.example.com/ws"); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveChannel("nightly"); err == nil {
+		t.Error("SaveChannel(nightly) should fail")
+	}
+	if err := SaveChannel(ChannelBeta); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Token != "bc_test123" || cfg.Endpoint != "wss://api.example.com/ws" || cfg.Channel != ChannelBeta {
+		t.Errorf("config = %+v", cfg)
+	}
+}
