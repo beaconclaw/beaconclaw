@@ -41,7 +41,7 @@ What it does not do, as of this version:
 
 - An OpenClaw gateway running locally
 - A BeaconClaw agent token (`bc_` prefix)
-- Go 1.26+ only if you build from source
+- Go 1.27+ only if you build from source
 
 ## Install
 
