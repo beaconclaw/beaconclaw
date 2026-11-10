@@ -33,7 +33,8 @@ Outbound-only means nothing connects in to your machine. It does not mean no dat
 What it does not do, as of this version:
 
 - It does not read or send conversations, sessions, messages, prompts, logs, files, credentials or usage data.
-- It reads `~/.openclaw/openclaw.json` only to find the gateway port.
+- It reads `~/.openclaw/openclaw.json` only to find the gateway port. If that file is missing it looks for the same setting in the older `~/.clawdbot/` and `~/.moldbot/` folders.
+- It runs `openclaw --version` to learn the OpenClaw version, and nothing else.
 - It cannot receive or run commands from the manager.
 - It opens no listening ports.
 
@@ -157,6 +158,12 @@ Every command acts on one profile and leaves the others alone. Choose the profil
 | `BEACONCLAW_ENDPOINT` | Manager WebSocket URL | `wss://api.beaconclaw.ai/ws` |
 | `BEACONCLAW_OPENCLAW_PORT` | Override OpenClaw gateway port | auto-detected |
 | `BEACONCLAW_PROFILE` | Profile to act on | default profile |
+
+`beaconclaw update` also reads `GITHUB_TOKEN` if it is set, and sends it to GitHub only to raise the download rate limit. `BEACONCLAW_RELEASES_API` and `BEACONCLAW_RELEASES_DOWNLOAD` point the updater at another release host for testing; it must be an `https` address unless it is on this machine.
+
+The manager address must start with `wss://`. An unencrypted `ws://` address is accepted only for a manager on the same machine.
+
+On Linux, `beaconclaw install` copies your current `PATH` into the service definition so the service can find `openclaw`.
 
 The agent auto-detects the OpenClaw gateway port from `~/.openclaw/openclaw.json`. You can also set `OPENCLAW_GATEWAY_PORT` to override.
 

@@ -11,7 +11,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -67,7 +69,29 @@ type release struct {
 	Prerelease bool   `json:"prerelease"`
 }
 
+// checkSecure refuses to fetch a release over an unencrypted connection. Plain
+// http is accepted only for a server on this machine, which is what tests use.
+func checkSecure(rawURL string) error {
+	u, err := neturl.Parse(rawURL)
+	if err != nil || u.Host == "" {
+		return fmt.Errorf("invalid release address %q", rawURL)
+	}
+	if u.Scheme == "https" {
+		return nil
+	}
+	host := u.Hostname()
+	if u.Scheme == "http" {
+		if ip := net.ParseIP(host); host == "localhost" || (ip != nil && ip.IsLoopback()) {
+			return nil
+		}
+	}
+	return fmt.Errorf("refusing %q: releases are fetched over https only", rawURL)
+}
+
 func (c *Client) get(ctx context.Context, url string) (*http.Response, error) {
+	if err := checkSecure(url); err != nil {
+		return nil, err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -106,6 +130,9 @@ func (c *Client) Latest(ctx context.Context, channel string) (string, error) {
 		}
 		if r.Prerelease || r.Draft || IsPrereleaseTag(r.TagName) {
 			return "", fmt.Errorf("refusing %s: the stable track returned a pre-release", r.TagName)
+		}
+		if _, err := ParseVersion(r.TagName); err != nil {
+			return "", fmt.Errorf("refusing %q: the stable track returned something that is not a version", r.TagName)
 		}
 		return r.TagName, nil
 

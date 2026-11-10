@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -119,10 +120,52 @@ func Validate(cfg *Config) error {
 	if cfg.Endpoint == "" {
 		return fmt.Errorf("manager endpoint required")
 	}
+	if err := checkEndpoint(cfg.Endpoint); err != nil {
+		return err
+	}
 	if cfg.OpenClawPort < 1 || cfg.OpenClawPort > 65535 {
 		return fmt.Errorf("invalid OpenClaw port: %d", cfg.OpenClawPort)
 	}
 	return nil
+}
+
+// checkEndpoint accepts an encrypted WebSocket address. An unencrypted one
+// would send the agent token in the clear, so it is allowed only for a manager
+// on this same machine.
+func checkEndpoint(endpoint string) error {
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Host == "" || (u.Scheme != "wss" && u.Scheme != "ws") {
+		return fmt.Errorf("invalid endpoint %q: expected a WebSocket address such as %s", endpoint, DefaultManagerEndpoint)
+	}
+	if u.Scheme == "ws" && !isLoopback(u.Hostname()) {
+		return fmt.Errorf("endpoint %q is not encrypted: use wss:// (ws:// is accepted only for a manager on this machine)", endpoint)
+	}
+	return nil
+}
+
+func isLoopback(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// writePrivate writes a file that only this user may read, in a folder that
+// only this user may enter. The modes are applied even when the file or
+// folder already existed with looser ones.
+func writePrivate(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	if err := os.Chmod(dir, 0700); err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		return err
+	}
+	return os.Chmod(path, 0600)
 }
 
 func stateDirectory() string {
@@ -132,9 +175,8 @@ func stateDirectory() string {
 // SaveEndpoint records the manager address this profile reports to, keeping
 // other settings.
 func SaveEndpoint(endpoint string) error {
-	u, err := url.Parse(endpoint)
-	if err != nil || (u.Scheme != "wss" && u.Scheme != "ws") || u.Host == "" {
-		return fmt.Errorf("invalid endpoint %q: expected a WebSocket address such as %s", endpoint, DefaultManagerEndpoint)
+	if err := checkEndpoint(endpoint); err != nil {
+		return err
 	}
 	fc, _ := loadFileConfig()
 	if fc == nil {
@@ -172,14 +214,11 @@ func SaveChannel(channel string) error {
 }
 
 func writeFileConfig(fc *fileConfig) error {
-	if err := os.MkdirAll(stateDirectory(), 0700); err != nil {
-		return fmt.Errorf("create config dir: %w", err)
-	}
 	data, err := json.MarshalIndent(fc, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
 	}
-	if err := os.WriteFile(configFilePath(), append(data, '\n'), 0600); err != nil {
+	if err := writePrivate(configFilePath(), append(data, '\n')); err != nil {
 		return fmt.Errorf("write config: %w", err)
 	}
 	return nil
@@ -275,10 +314,7 @@ func loadOrCreateInstanceID() (string, error) {
 	// Generate new ID
 	id := uuid.New().String()
 
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return "", fmt.Errorf("create state dir: %w", err)
-	}
-	if err := os.WriteFile(path, []byte(id+"\n"), 0600); err != nil {
+	if err := writePrivate(path, []byte(id+"\n")); err != nil {
 		return "", fmt.Errorf("write agent ID: %w", err)
 	}
 
