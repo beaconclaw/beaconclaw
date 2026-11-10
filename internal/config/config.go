@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+
+	"github.com/beaconclaw/beaconclaw/internal/profile"
 )
 
 const (
@@ -17,9 +19,12 @@ const (
 	DefaultHeartbeatSec    = 30
 	DefaultBufferCapacity  = 100
 
-	stateDir       = ".beaconclaw"
-	instanceIDFile = "instance-id"
-	configFile     = "config.json"
+	// Release tracks. Stable is the default; beta also includes pre-releases.
+	ChannelStable = "stable"
+	ChannelBeta   = "beta"
+
+	instanceIDFile   = "instance-id"
+	configFile       = "config.json"
 	openclawStateDir = ".openclaw"
 	openclawConfig   = "openclaw.json"
 )
@@ -31,12 +36,15 @@ type Config struct {
 	InstanceID        string
 	HeartbeatInterval int
 	BufferCapacity    int
+	// Channel is the release track this profile updates from.
+	Channel string
 }
 
 type fileConfig struct {
 	Token        string `json:"token,omitempty"`
 	Endpoint     string `json:"endpoint,omitempty"`
 	OpenClawPort int    `json:"openclaw_port,omitempty"`
+	Channel      string `json:"channel,omitempty"`
 }
 
 func Load() (*Config, error) {
@@ -45,6 +53,7 @@ func Load() (*Config, error) {
 		OpenClawPort:      DefaultOpenClawPort,
 		HeartbeatInterval: DefaultHeartbeatSec,
 		BufferCapacity:    DefaultBufferCapacity,
+		Channel:           ChannelStable,
 	}
 
 	// Load from config file (lowest priority)
@@ -57,6 +66,9 @@ func Load() (*Config, error) {
 		}
 		if fc.OpenClawPort > 0 {
 			cfg.OpenClawPort = fc.OpenClawPort
+		}
+		if ValidChannel(fc.Channel) {
+			cfg.Channel = fc.Channel
 		}
 	}
 
@@ -113,11 +125,48 @@ func Validate(cfg *Config) error {
 }
 
 func stateDirectory() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return filepath.Join(".", stateDir)
+	return profile.StateDir()
+}
+
+// ValidChannel reports whether name is a known release track.
+func ValidChannel(name string) bool {
+	return name == ChannelStable || name == ChannelBeta
+}
+
+// LoadChannel returns this profile's release track without creating any
+// state on disk. It defaults to stable.
+func LoadChannel() string {
+	if fc, err := loadFileConfig(); err == nil && ValidChannel(fc.Channel) {
+		return fc.Channel
 	}
-	return filepath.Join(home, stateDir)
+	return ChannelStable
+}
+
+// SaveChannel records this profile's release track, keeping other settings.
+func SaveChannel(channel string) error {
+	if !ValidChannel(channel) {
+		return fmt.Errorf("unknown channel %q: use %s or %s", channel, ChannelStable, ChannelBeta)
+	}
+	fc, _ := loadFileConfig()
+	if fc == nil {
+		fc = &fileConfig{}
+	}
+	fc.Channel = channel
+	return writeFileConfig(fc)
+}
+
+func writeFileConfig(fc *fileConfig) error {
+	if err := os.MkdirAll(stateDirectory(), 0700); err != nil {
+		return fmt.Errorf("create config dir: %w", err)
+	}
+	data, err := json.MarshalIndent(fc, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+	if err := os.WriteFile(configFilePath(), append(data, '\n'), 0600); err != nil {
+		return fmt.Errorf("write config: %w", err)
+	}
+	return nil
 }
 
 func configFilePath() string {
@@ -129,11 +178,6 @@ func SaveToken(token string) error {
 		return fmt.Errorf("agent token must start with 'bc_' prefix")
 	}
 
-	dir := stateDirectory()
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return fmt.Errorf("create config dir: %w", err)
-	}
-
 	// Load existing config to preserve other fields
 	fc, _ := loadFileConfig()
 	if fc == nil {
@@ -141,16 +185,7 @@ func SaveToken(token string) error {
 	}
 	fc.Token = token
 
-	data, err := json.MarshalIndent(fc, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal config: %w", err)
-	}
-
-	if err := os.WriteFile(configFilePath(), append(data, '\n'), 0600); err != nil {
-		return fmt.Errorf("write config: %w", err)
-	}
-
-	return nil
+	return writeFileConfig(fc)
 }
 
 func loadFileConfig() (*fileConfig, error) {

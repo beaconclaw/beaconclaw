@@ -47,6 +47,43 @@ What it does not do, as of this version:
 
 Download the binary for your platform from the [releases page](https://github.com/beaconclaw/beaconclaw/releases), make it executable, and put it on your `PATH`. Binaries are published for Linux, macOS and Windows on amd64 and arm64.
 
+Each release includes a `checksums.txt` file with the SHA-256 of every binary.
+
+## Release Tracks
+
+| Track | What it gets | Tag form |
+|-------|--------------|----------|
+| `stable` (default) | Official releases only | `v0.1.0` |
+| `beta` | Pre-releases as well | `v0.1.0-beta.1` |
+
+A copy stays on `stable` unless you move it. Pre-releases are published as GitHub pre-releases and are never marked "latest".
+
+## Updating
+
+```sh
+# Update to the newest release on this copy's track
+beaconclaw update
+
+# Only report what is available
+beaconclaw update --check
+
+# Switch track, then update. The choice is remembered.
+beaconclaw update --channel beta
+
+# Install an exact version
+beaconclaw update --version v0.1.0-beta.1
+
+# Show or set the track without updating
+beaconclaw channel
+beaconclaw channel beta
+```
+
+`update` downloads the binary for your platform, checks it against the release's `checksums.txt`, confirms the new binary runs, replaces the old one in a single step, and restarts the service if it was running. If any step fails, the old binary stays in place. If the service does not come back on the new version, the old binary is restored and restarted.
+
+Without `--version`, `update` never moves to an older version than the one installed.
+
+There are no automatic updates. A copy changes version only when someone runs `update`.
+
 ## Local Development
 
 ```sh
@@ -85,11 +122,30 @@ beaconclaw status
 # Remove the system service
 beaconclaw uninstall
 
-# Print version
+# Print version and release track
 beaconclaw version
 ```
 
 `beaconclaw install` registers a service for the current user, not a system-wide one: a systemd user unit on Linux, a launchd agent on macOS, and a scheduled task on Windows. It needs no root access. `restart` restarts the BeaconClaw agent, not OpenClaw.
+
+### Profiles
+
+A profile is a second, independent copy of the agent on the same machine, for example one reporting to a test manager beside the normal one. Each profile has its own config folder, agent ID, token, release track, service and logs.
+
+```sh
+beaconclaw --profile dev auth --token bc_your_other_token
+beaconclaw --profile dev install
+beaconclaw --profile dev status
+```
+
+| | Default profile | Profile `dev` |
+|---|---|---|
+| Config folder | `~/.beaconclaw/` | `~/.beaconclaw-dev/` |
+| Linux service | `beaconclaw.service` | `beaconclaw-dev.service` |
+| macOS service | `ai.beaconclaw.agent` | `ai.beaconclaw.agent.dev` |
+| Windows task | `BeaconClaw` | `BeaconClaw-dev` |
+
+Every command acts on one profile and leaves the others alone. Choose the profile with `--profile`, with `BEACONCLAW_PROFILE`, or by installing the binary under the name `beaconclaw-<profile>`: a binary named `beaconclaw-dev` acts on the `dev` profile with no flag. Giving each profile its own binary also lets them run different versions, since `update` replaces only the binary it is run from.
 
 ### Environment Variables
 
@@ -98,6 +154,7 @@ beaconclaw version
 | `BEACONCLAW_TOKEN` | Agent token (required) | — |
 | `BEACONCLAW_ENDPOINT` | Manager WebSocket URL | `wss://api.beaconclaw.ai/ws` |
 | `BEACONCLAW_OPENCLAW_PORT` | Override OpenClaw gateway port | auto-detected |
+| `BEACONCLAW_PROFILE` | Profile to act on | default profile |
 
 The agent auto-detects the OpenClaw gateway port from `~/.openclaw/openclaw.json`. You can also set `OPENCLAW_GATEWAY_PORT` to override.
 
@@ -109,31 +166,38 @@ Optional. Place at `~/.beaconclaw/config.json`:
 {
   "token": "bc_...",
   "endpoint": "wss://api.beaconclaw.ai/ws",
-  "openclaw_port": 18789
+  "openclaw_port": 18789,
+  "channel": "stable"
 }
 ```
+
+A named profile reads `~/.beaconclaw-<profile>/config.json` instead.
 
 Environment variables override the config file, which overrides the defaults.
 
 ## Releasing
 
-Releases are automated via GitHub Actions. Pushing a version tag builds cross-platform binaries and publishes them as a GitHub Release.
+Releases are automated via GitHub Actions. Pushing a version tag builds cross-platform binaries and publishes them as a GitHub Release. The tag decides the track:
 
 ```sh
-# Tag the release
-git tag v0.1.0
+# Pre-release on the beta track
+git tag v0.1.0-beta.1
+git push origin v0.1.0-beta.1
 
-# Push the tag (triggers the release workflow)
-git push origin main --tags
+# Official release on the stable track
+git tag v0.1.0
+git push origin v0.1.0
 ```
 
-The workflow runs tests, cross-compiles for all targets (linux/darwin/windows, amd64/arm64), and attaches the binaries to the release at:
+The workflow runs tests, cross-compiles for all targets (linux/darwin/windows, amd64/arm64), writes `checksums.txt`, and attaches the files to the release at:
 
 ```
 https://github.com/beaconclaw/beaconclaw/releases/download/v0.1.0/beaconclaw-linux-amd64
 ```
 
-The version tag is baked into the binary via `-ldflags` at build time, so `beaconclaw version` will print the tag (e.g. `beaconclaw v0.1.0`).
+A tag with a pre-release suffix (`-alpha.N`, `-beta.N`, `-rc.N`) is published as a pre-release and is not marked "latest". Any other tag shape is rejected. The workflow ends by checking that "latest" still points at a stable release.
+
+The version tag is baked into the binary via `-ldflags` at build time, so `beaconclaw version` will print the tag (e.g. `beaconclaw v0.1.0 (track: stable)`).
 
 ### Manual Deploy
 
@@ -158,6 +222,8 @@ internal/
   config/            Config loading and validation
   heartbeat/         Payload assembly and system metrics
   openclaw/          HTTP health probes and version detection
+  profile/           Named profiles: separate copies on one machine
+  update/            Release lookup, checksum verification, binary replacement
   ws/                WebSocket client and reconnection
 ```
 

@@ -8,15 +8,17 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/beaconclaw/beaconclaw/internal/profile"
 )
 
-const (
-	taskName = "BeaconClaw"
-)
+// taskName is BeaconClaw, or BeaconClaw-<profile>.
+func taskName() string {
+	return "BeaconClaw" + profile.Suffix()
+}
 
 func stateDir() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".beaconclaw")
+	return profile.StateDir()
 }
 
 func scriptPath() string {
@@ -29,8 +31,8 @@ func logDir() string {
 
 func buildScript(execPath string) string {
 	logs := logDir()
-	return fmt.Sprintf("@echo off\r\n\"%s\" --_daemon >> \"%s\\agent.log\" 2>> \"%s\\agent.err.log\"\r\n",
-		execPath, logs, logs)
+	return fmt.Sprintf("@echo off\r\n\"%s\" %s >> \"%s\\agent.log\" 2>> \"%s\\agent.err.log\"\r\n",
+		execPath, strings.Join(daemonArgs(), " "), logs, logs)
 }
 
 func schtasks(args ...string) ([]byte, error) {
@@ -53,7 +55,7 @@ func install(execPath string) error {
 		"/Create", "/F",
 		"/SC", "ONLOGON",
 		"/RL", "LIMITED",
-		"/TN", taskName,
+		"/TN", taskName(),
 		"/TR", fmt.Sprintf(`"%s"`, scriptPath()),
 	)
 	if err != nil {
@@ -61,7 +63,7 @@ func install(execPath string) error {
 	}
 
 	// Start immediately
-	if out, err := schtasks("/Run", "/TN", taskName); err != nil {
+	if out, err := schtasks("/Run", "/TN", taskName()); err != nil {
 		return fmt.Errorf("schtasks run: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 
@@ -74,8 +76,8 @@ func uninstall() error {
 	}
 
 	// Delete scheduled task
-	schtasks("/End", "/TN", taskName)
-	if out, err := schtasks("/Delete", "/F", "/TN", taskName); err != nil {
+	schtasks("/End", "/TN", taskName())
+	if out, err := schtasks("/Delete", "/F", "/TN", taskName()); err != nil {
 		return fmt.Errorf("schtasks delete: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 
@@ -89,14 +91,14 @@ func start() error {
 	if !isInstalled() {
 		return fmt.Errorf("service not installed. Run 'beaconclaw install' first")
 	}
-	if out, err := schtasks("/Run", "/TN", taskName); err != nil {
+	if out, err := schtasks("/Run", "/TN", taskName()); err != nil {
 		return fmt.Errorf("schtasks run: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 	return nil
 }
 
 func stop() error {
-	if out, err := schtasks("/End", "/TN", taskName); err != nil {
+	if out, err := schtasks("/End", "/TN", taskName()); err != nil {
 		return fmt.Errorf("schtasks end: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 	return nil
@@ -108,7 +110,7 @@ func restart() error {
 }
 
 func isInstalled() bool {
-	_, err := schtasks("/Query", "/TN", taskName)
+	_, err := schtasks("/Query", "/TN", taskName())
 	return err == nil
 }
 
@@ -118,7 +120,7 @@ func getStatus() Status {
 		return s
 	}
 
-	out, err := schtasks("/Query", "/TN", taskName, "/V", "/FO", "LIST")
+	out, err := schtasks("/Query", "/TN", taskName(), "/V", "/FO", "LIST")
 	if err != nil {
 		return s
 	}
