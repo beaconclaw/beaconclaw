@@ -40,6 +40,8 @@ What it does not do, as of this version:
 - It cannot receive or run commands from the manager.
 - It opens no listening ports.
 
+Heartbeats the manager has not yet acknowledged are kept in `outbox.json` in the agent's config folder, readable only by your user, so an outage or a restart does not lose them. By default up to two hours' worth are kept; the oldest are dropped first. They are removed as soon as the manager confirms them.
+
 ## Requirements
 
 - An OpenClaw gateway running locally
@@ -230,9 +232,9 @@ cmd/beaconclaw/      CLI entrypoint
 internal/
   adapter/           The boundary between the agent and the runtime it watches
   agent/             Daemon orchestrator
-  buffer/            Ring buffer for offline heartbeats
   config/            Config loading and validation
   heartbeat/         Payload assembly and system metrics
+  outbox/            Heartbeats waiting to be acknowledged, kept on disk
   openclaw/          The OpenClaw adapter: health probes, version and port lookup
   profile/           Named profiles: separate copies on one machine
   update/            Release lookup, checksum verification, binary replacement

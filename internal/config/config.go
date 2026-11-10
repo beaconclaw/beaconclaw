@@ -21,7 +21,8 @@ const (
 	DefaultManagerEndpoint = "wss://api.beaconclaw.ai/ws"
 	DefaultOpenClawPort    = openclaw.DefaultPort
 	DefaultHeartbeatSec    = 30
-	DefaultBufferCapacity  = 100
+	// Two hours of heartbeats are kept through an outage.
+	DefaultBufferCapacity = 240
 
 	// Release tracks. Stable is the default; beta also includes pre-releases.
 	ChannelStable = "stable"
@@ -166,6 +167,12 @@ func writePrivate(path string, data []byte) error {
 		return err
 	}
 	return os.Chmod(path, 0600)
+}
+
+// OutboxPath is where this profile keeps heartbeats that are waiting to be
+// acknowledged.
+func OutboxPath() string {
+	return filepath.Join(stateDirectory(), "outbox.json")
 }
 
 func stateDirectory() string {

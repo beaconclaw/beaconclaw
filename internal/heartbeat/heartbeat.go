@@ -63,6 +63,13 @@ func NewCollector(instanceID string, runtime adapter.Adapter) *Collector {
 // Collect gathers a single heartbeat payload.
 func (c *Collector) Collect(ctx context.Context) Payload {
 	c.seq++
+	return c.CollectAs(ctx, c.seq)
+}
+
+// CollectAs gathers a heartbeat with a sequence number chosen by the caller,
+// for a caller that keeps the numbering itself.
+func (c *Collector) CollectAs(ctx context.Context, seq uint64) Payload {
+	c.seq = seq
 	report := c.runtime.Probe(ctx)
 	failing := report.Failing
 	if failing == nil {
