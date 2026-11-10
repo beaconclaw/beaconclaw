@@ -2,38 +2,71 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"os"
 	"runtime"
 	"time"
 
 	"github.com/beaconclaw/beaconclaw/internal/adapter"
-	"github.com/beaconclaw/beaconclaw/internal/buffer"
 	"github.com/beaconclaw/beaconclaw/internal/config"
 	"github.com/beaconclaw/beaconclaw/internal/heartbeat"
 	"github.com/beaconclaw/beaconclaw/internal/openclaw"
+	"github.com/beaconclaw/beaconclaw/internal/outbox"
 	"github.com/beaconclaw/beaconclaw/internal/ws"
 )
 
+const (
+	// How long the manager has to acknowledge a heartbeat before the
+	// connection is treated as broken.
+	defaultAckTimeout = 20 * time.Second
+	// How often unacknowledged heartbeats are checked.
+	defaultAckCheck = 5 * time.Second
+	// A heartbeat the manager never acknowledges is given up on after this
+	// many sends, so one bad heartbeat cannot hold up the rest for ever.
+	maxSendAttempts = 3
+)
+
 // Agent is the main daemon orchestrator.
+//
+// It collects a heartbeat on every tick whether or not the manager can be
+// reached, and keeps each one in the outbox until the manager acknowledges
+// it. Connecting happens on the side, so an outage never stops collection.
 type Agent struct {
 	cfg       *config.Config
 	client    *ws.Client
 	collector *heartbeat.Collector
 	runtime   adapter.Adapter
-	buf       *buffer.Ring[heartbeat.Payload]
-	backoff   *ws.Backoff
+	outbox    *outbox.Outbox
+
+	interval   time.Duration
+	ackTimeout time.Duration
+	ackCheck   time.Duration
+
+	// The fields below belong to the Run loop alone.
+	connecting bool
+	// sent holds when each unacknowledged heartbeat was last sent on the
+	// current connection.
+	sent map[uint64]time.Time
+	// attempts counts how many times each heartbeat has been sent in all.
+	attempts map[uint64]int
+	// managerProtocol is the protocol version the manager said it understands.
+	managerProtocol int
 }
 
 func New(cfg *config.Config) *Agent {
 	runtime := openclaw.NewAdapter(cfg.OpenClawPort)
 	return &Agent{
-		cfg:       cfg,
-		client:    ws.NewClient(cfg.Endpoint, cfg.Token),
-		collector: heartbeat.NewCollector(cfg.InstanceID, runtime),
-		runtime:   runtime,
-		buf:       buffer.New[heartbeat.Payload](cfg.BufferCapacity),
-		backoff:   ws.NewBackoff(),
+		cfg:        cfg,
+		client:     ws.NewClient(cfg.Endpoint, cfg.Token),
+		collector:  heartbeat.NewCollector(cfg.InstanceID, runtime),
+		runtime:    runtime,
+		outbox:     outbox.Open(config.OutboxPath(), cfg.BufferCapacity),
+		interval:   time.Duration(cfg.HeartbeatInterval) * time.Second,
+		ackTimeout: defaultAckTimeout,
+		ackCheck:   defaultAckCheck,
+		sent:       map[uint64]time.Time{},
+		attempts:   map[uint64]int{},
 	}
 }
 
@@ -42,12 +75,17 @@ func (a *Agent) Run(ctx context.Context) error {
 	log.Printf("beaconclaw agent starting (agent=%s)", a.cfg.InstanceID)
 	log.Printf("manager endpoint: %s", a.cfg.Endpoint)
 	log.Printf("%s gateway: %s", a.runtime.Name(), a.runtime.Target())
+	if waiting := a.outbox.Len(); waiting > 0 {
+		log.Printf("%d heartbeats from before this start are waiting to be sent", waiting)
+	}
 
-	// Initial connection
-	a.connectWithRetry(ctx)
+	connected := make(chan struct{}, 1)
+	a.connect(ctx, connected)
 
-	ticker := time.NewTicker(time.Duration(a.cfg.HeartbeatInterval) * time.Second)
+	ticker := time.NewTicker(a.interval)
 	defer ticker.Stop()
+	ackTicker := time.NewTicker(a.ackCheck)
+	defer ackTicker.Stop()
 
 	for {
 		select {
@@ -55,47 +93,137 @@ func (a *Agent) Run(ctx context.Context) error {
 			log.Println("shutting down...")
 			a.client.Close()
 			return nil
+
 		case <-ticker.C:
-			a.tick(ctx)
-		}
-	}
-}
+			a.collect(ctx)
+			a.flush(ctx, connected)
 
-func (a *Agent) tick(ctx context.Context) {
-	payload := a.collector.Collect(ctx)
+		case <-connected:
+			a.connecting = false
+			a.flush(ctx, connected)
 
-	if !a.client.IsConnected() {
-		a.buf.Push(payload)
-		log.Printf("offline — buffered heartbeat (seq=%d, buffered=%d)", payload.Seq, a.buf.Len())
-		a.connectWithRetry(ctx)
-		return
-	}
+		case m := <-a.client.Messages():
+			a.handle(m)
 
-	// Flush any buffered events first
-	if buffered := a.buf.Drain(); len(buffered) > 0 {
-		log.Printf("flushing %d buffered heartbeats", len(buffered))
-		for _, p := range buffered {
-			if err := a.client.SendHeartbeat(heartbeat.ProtocolVersion, p); err != nil {
-				log.Printf("flush error: %v", err)
-				a.buf.Push(payload)
-				a.handleDisconnect()
-				return
+		case <-a.client.Lost():
+			log.Println("connection to manager lost")
+			a.reconnect(ctx, connected)
+
+		case <-ackTicker.C:
+			if seq, late := a.overdue(); late {
+				log.Printf("no acknowledgement for heartbeat seq=%d after %s; reconnecting", seq, a.ackTimeout)
+				a.client.Close()
+				a.reconnect(ctx, connected)
 			}
 		}
 	}
+}
 
-	if err := a.client.SendHeartbeat(heartbeat.ProtocolVersion, payload); err != nil {
-		log.Printf("heartbeat send error: %v", err)
-		a.buf.Push(payload)
-		a.handleDisconnect()
+// collect takes one heartbeat and puts it in the outbox. It never waits on
+// the network.
+func (a *Agent) collect(ctx context.Context) {
+	payload := a.collector.CollectAs(ctx, a.outbox.NextSeq())
+	data, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("could not encode heartbeat seq=%d: %v", payload.Seq, err)
 		return
 	}
-
-	log.Printf("heartbeat sent (seq=%d, %s=%s, cpu=%.1f%%, mem=%.1f%%)",
+	if err := a.outbox.Add(payload.Seq, data); err != nil {
+		// The heartbeat is still held in memory; only its copy on disk failed.
+		log.Printf("could not save heartbeat seq=%d to disk: %v", payload.Seq, err)
+	}
+	log.Printf("heartbeat collected (seq=%d, %s=%s, cpu=%.1f%%, mem=%.1f%%)",
 		payload.Seq, a.runtime.Name(), runtimeState(payload.Report), payload.System.CPUPercent, payload.System.MemoryPercent)
 }
 
+// flush sends every heartbeat that is waiting and has not yet been sent on
+// this connection, oldest first.
+func (a *Agent) flush(ctx context.Context, connected chan struct{}) {
+	if !a.client.IsConnected() {
+		if waiting := a.outbox.Len(); waiting > 0 && !a.connecting {
+			log.Printf("offline: %d heartbeats waiting", waiting)
+		}
+		a.connect(ctx, connected)
+		return
+	}
+
+	for _, entry := range a.outbox.Pending() {
+		if _, inFlight := a.sent[entry.Seq]; inFlight {
+			continue
+		}
+		if a.attempts[entry.Seq] >= maxSendAttempts {
+			log.Printf("giving up on heartbeat seq=%d: sent %d times with no acknowledgement", entry.Seq, maxSendAttempts)
+			a.outbox.Drop(entry.Seq)
+			delete(a.attempts, entry.Seq)
+			continue
+		}
+		if err := a.client.SendHeartbeat(heartbeat.ProtocolVersion, entry.Data); err != nil {
+			log.Printf("heartbeat send error (seq=%d): %v", entry.Seq, err)
+			a.client.Close()
+			a.reconnect(ctx, connected)
+			return
+		}
+		a.sent[entry.Seq] = time.Now()
+		a.attempts[entry.Seq]++
+	}
+}
+
+// handle acts on a message from the manager.
+func (a *Agent) handle(m ws.Message) {
+	switch m.Type {
+	case "heartbeat_ack":
+		delete(a.sent, m.Seq)
+		delete(a.attempts, m.Seq)
+		if a.outbox.Ack(m.Seq) {
+			log.Printf("heartbeat acknowledged (seq=%d, waiting=%d)", m.Seq, a.outbox.Len())
+		}
+	case "register_ack":
+		// A manager from before protocol version 2 does not say; it speaks 1.
+		a.managerProtocol = m.Protocol
+		if a.managerProtocol < 1 {
+			a.managerProtocol = 1
+		}
+		log.Printf("registered with manager (manager protocol %d, agent protocol %d)", a.managerProtocol, heartbeat.ProtocolVersion)
+	}
+}
+
+// overdue reports a heartbeat that was sent and not acknowledged in time.
+func (a *Agent) overdue() (uint64, bool) {
+	for seq, at := range a.sent {
+		if time.Since(at) > a.ackTimeout {
+			return seq, true
+		}
+	}
+	return 0, false
+}
+
+// reconnect forgets what was in flight on the old connection, so it is sent
+// again on the new one, and starts connecting.
+func (a *Agent) reconnect(ctx context.Context, connected chan struct{}) {
+	a.sent = map[uint64]time.Time{}
+	a.connect(ctx, connected)
+}
+
+// connect starts connecting on the side, unless that is already under way.
+// Collection carries on meanwhile.
+func (a *Agent) connect(ctx context.Context, connected chan struct{}) {
+	if a.connecting || a.client.IsConnected() {
+		return
+	}
+	a.connecting = true
+	go func() {
+		a.connectWithRetry(ctx)
+		select {
+		case connected <- struct{}{}:
+		case <-ctx.Done():
+		}
+	}()
+}
+
+// connectWithRetry dials and registers, backing off between failures, until it
+// succeeds or the agent is stopped.
 func (a *Agent) connectWithRetry(ctx context.Context) {
+	backoff := ws.NewBackoff()
 	for {
 		select {
 		case <-ctx.Done():
@@ -103,60 +231,46 @@ func (a *Agent) connectWithRetry(ctx context.Context) {
 		default:
 		}
 
-		if err := a.client.Connect(); err != nil {
-			wait := a.backoff.Next()
-			log.Printf("connection failed (attempt %d): %v — retrying in %s",
-				a.backoff.Attempt(), err, wait.Round(time.Millisecond))
-
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(wait):
-				continue
+		err := a.client.Connect()
+		if err == nil {
+			err = a.client.SendRegistration(a.registration())
+			if err != nil {
+				a.client.Close()
 			}
 		}
-
-		a.backoff.Reset()
-		log.Println("connected to manager")
-
-		// Send registration
-		hostname, _ := os.Hostname()
-		capabilities := []string{}
-		for _, c := range a.runtime.Capabilities() {
-			capabilities = append(capabilities, string(c))
-		}
-		reg := ws.Registration{
-			Protocol:   heartbeat.ProtocolVersion,
-			AgentID:    a.cfg.InstanceID,
-			InstanceID: a.cfg.InstanceID,
-			Runtime:    ws.RegistrationRuntime{Kind: a.runtime.Name(), Capabilities: capabilities},
-			OS:         runtime.GOOS,
-			Arch:       runtime.GOARCH,
-			Hostname:   hostname,
-			Version:    Version,
-		}
-		if err := a.client.SendRegistration(reg); err != nil {
-			log.Printf("registration failed: %v", err)
-			a.handleDisconnect()
-			continue
+		if err == nil {
+			log.Println("connected to manager")
+			return
 		}
 
-		log.Println("registered with manager")
-		return
+		wait := backoff.Next()
+		log.Printf("connection failed (attempt %d): %v — retrying in %s",
+			backoff.Attempt(), err, wait.Round(time.Millisecond))
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(wait):
+		}
 	}
 }
 
-func (a *Agent) handleDisconnect() {
-	a.client.Close()
-	a.backoff.Reset()
-}
-
-// Status returns the current agent status for the CLI.
-func (a *Agent) Status() string {
-	if a.client.IsConnected() {
-		return "connected"
+func (a *Agent) registration() ws.Registration {
+	hostname, _ := os.Hostname()
+	capabilities := []string{}
+	for _, c := range a.runtime.Capabilities() {
+		capabilities = append(capabilities, string(c))
 	}
-	return "disconnected"
+	return ws.Registration{
+		Protocol:   heartbeat.ProtocolVersion,
+		AgentID:    a.cfg.InstanceID,
+		InstanceID: a.cfg.InstanceID,
+		Runtime:    ws.RegistrationRuntime{Kind: a.runtime.Name(), Capabilities: capabilities},
+		OS:         runtime.GOOS,
+		Arch:       runtime.GOARCH,
+		Hostname:   hostname,
+		Version:    Version,
+	}
 }
 
 // runtimeState puts a report in one word for the log.

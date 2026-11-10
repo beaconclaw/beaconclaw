@@ -38,10 +38,42 @@ type RegistrationRuntime struct {
 	Capabilities []string `json:"capabilities"`
 }
 
-// Client manages a WebSocket connection to the BeaconClaw manager.
+// Message is something the manager sent to the agent.
+type Message struct {
+	// Type is "register_ack" or "heartbeat_ack". Other types are ignored by
+	// the agent, so a newer manager can add messages without breaking it.
+	Type string `json:"type"`
+	// Seq is the heartbeat being acknowledged, on a "heartbeat_ack".
+	Seq uint64 `json:"seq"`
+	// Protocol is the newest protocol version the manager understands, on a
+	// "register_ack". A manager from before version 2 sends none.
+	Protocol int `json:"protocol"`
+}
+
+// maxMessageBytes bounds what the agent will read from the manager. Its
+// messages are a few dozen bytes.
+const maxMessageBytes = 64 * 1024
+
+// Timing is how the client decides a connection is alive. It is a field so
+// tests can use short times.
+type Timing struct {
+	// PingEvery is how often the agent pings the manager.
+	PingEvery time.Duration
+	// SilentAfter is how long the agent waits to hear anything, a pong
+	// included, before it treats the connection as dead.
+	SilentAfter time.Duration
+}
+
+// Client manages a WebSocket connection to the BeaconClaw manager. It reads as
+// well as writes: what the manager sends arrives on Messages, and a connection
+// that closes or goes silent is reported on Lost.
 type Client struct {
 	endpoint string
 	token    string
+	timing   Timing
+
+	messages chan Message
+	lost     chan struct{}
 
 	mu   sync.Mutex
 	conn *websocket.Conn
@@ -51,10 +83,24 @@ func NewClient(endpoint, token string) *Client {
 	return &Client{
 		endpoint: endpoint,
 		token:    token,
+		timing:   Timing{PingEvery: pingInterval, SilentAfter: pongTimeout},
+		messages: make(chan Message, 256),
+		lost:     make(chan struct{}, 1),
 	}
 }
 
-// Connect establishes a WebSocket connection to the manager.
+// SetTiming replaces the liveness timing. Call it before Connect.
+func (c *Client) SetTiming(t Timing) { c.timing = t }
+
+// Messages delivers what the manager sends, in order.
+func (c *Client) Messages() <-chan Message { return c.messages }
+
+// Lost signals that the connection closed or went silent. The agent should
+// reconnect.
+func (c *Client) Lost() <-chan struct{} { return c.lost }
+
+// Connect establishes a WebSocket connection to the manager and starts
+// reading from it.
 func (c *Client) Connect() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -76,12 +122,84 @@ func (c *Client) Connect() error {
 		return fmt.Errorf("dial %s: %w", c.endpoint, err)
 	}
 
+	conn.SetReadLimit(maxMessageBytes)
+	silentAfter := c.timing.SilentAfter
+	_ = conn.SetReadDeadline(time.Now().Add(silentAfter))
 	conn.SetPongHandler(func(string) error {
-		return conn.SetReadDeadline(time.Now().Add(pongTimeout))
+		return conn.SetReadDeadline(time.Now().Add(silentAfter))
 	})
 
 	c.conn = conn
+	go c.readLoop(conn, silentAfter)
+	go c.pingLoop(conn, c.timing.PingEvery)
 	return nil
+}
+
+// readLoop reads until the connection fails. Anything heard, a message or a
+// pong, proves the connection is alive and pushes the deadline back. When the
+// read fails, because the manager closed the connection or nothing was heard
+// in time, the connection is dropped and Lost is signalled.
+func (c *Client) readLoop(conn *websocket.Conn, silentAfter time.Duration) {
+	for {
+		_, data, err := conn.ReadMessage()
+		if err != nil {
+			c.drop(conn)
+			return
+		}
+		_ = conn.SetReadDeadline(time.Now().Add(silentAfter))
+
+		var m Message
+		if json.Unmarshal(data, &m) != nil || m.Type == "" {
+			continue
+		}
+		select {
+		case c.messages <- m:
+		default:
+			// Nobody is taking messages. Dropping one only delays an
+			// acknowledgement; blocking here would stop liveness checks.
+		}
+	}
+}
+
+// pingLoop pings the manager until the connection is replaced or fails. The
+// pongs are what keep a quiet connection from being treated as dead.
+func (c *Client) pingLoop(conn *websocket.Conn, every time.Duration) {
+	ticker := time.NewTicker(every)
+	defer ticker.Stop()
+	for range ticker.C {
+		if !c.isCurrent(conn) {
+			return
+		}
+		if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(writeTimeout)); err != nil {
+			c.drop(conn)
+			return
+		}
+	}
+}
+
+func (c *Client) isCurrent(conn *websocket.Conn) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.conn == conn
+}
+
+// drop closes a failed connection. If it is still the current one, the client
+// becomes disconnected and Lost is signalled once.
+func (c *Client) drop(conn *websocket.Conn) {
+	c.mu.Lock()
+	current := c.conn == conn
+	if current {
+		c.conn = nil
+	}
+	c.mu.Unlock()
+
+	conn.Close()
+	if current {
+		select {
+		case c.lost <- struct{}{}:
+		default:
+		}
+	}
 }
 
 // SendJSON marshals v to JSON and sends it over the WebSocket.
@@ -133,9 +251,11 @@ func (c *Client) Close() error {
 		return nil
 	}
 
-	err := c.conn.WriteMessage(
+	// A deadline, so closing a connection that has gone dead cannot hang.
+	err := c.conn.WriteControl(
 		websocket.CloseMessage,
 		websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
+		time.Now().Add(time.Second),
 	)
 	c.conn.Close()
 	c.conn = nil
