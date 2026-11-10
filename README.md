@@ -133,7 +133,7 @@ beaconclaw version
 A profile is a second, independent copy of the agent on the same machine, for example one reporting to a test manager beside the normal one. Each profile has its own config folder, agent ID, token, release track, service and logs.
 
 ```sh
-beaconclaw --profile dev auth --token bc_your_other_token
+beaconclaw --profile dev auth --token bc_your_other_token --endpoint wss://manager.example.com/ws
 beaconclaw --profile dev install
 beaconclaw --profile dev status
 ```
@@ -144,6 +144,8 @@ beaconclaw --profile dev status
 | Linux service | `beaconclaw.service` | `beaconclaw-dev.service` |
 | macOS service | `ai.beaconclaw.agent` | `ai.beaconclaw.agent.dev` |
 | Windows task | `BeaconClaw` | `BeaconClaw-dev` |
+
+`--endpoint` saves the manager address in that profile's config. `auth` also reads the token from `BEACONCLAW_TOKEN`, which keeps it out of the command line and the shell history.
 
 Every command acts on one profile and leaves the others alone. Choose the profile with `--profile`, with `BEACONCLAW_PROFILE`, or by installing the binary under the name `beaconclaw-<profile>`: a binary named `beaconclaw-dev` acts on the `dev` profile with no flag. Giving each profile its own binary also lets them run different versions, since `update` replaces only the binary it is run from.
 

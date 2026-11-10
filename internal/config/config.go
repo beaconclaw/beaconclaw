@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -126,6 +127,21 @@ func Validate(cfg *Config) error {
 
 func stateDirectory() string {
 	return profile.StateDir()
+}
+
+// SaveEndpoint records the manager address this profile reports to, keeping
+// other settings.
+func SaveEndpoint(endpoint string) error {
+	u, err := url.Parse(endpoint)
+	if err != nil || (u.Scheme != "wss" && u.Scheme != "ws") || u.Host == "" {
+		return fmt.Errorf("invalid endpoint %q: expected a WebSocket address such as %s", endpoint, DefaultManagerEndpoint)
+	}
+	fc, _ := loadFileConfig()
+	if fc == nil {
+		fc = &fileConfig{}
+	}
+	fc.Endpoint = endpoint
+	return writeFileConfig(fc)
 }
 
 // ValidChannel reports whether name is a known release track.

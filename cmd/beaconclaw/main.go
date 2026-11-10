@@ -92,23 +92,36 @@ func authCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "auth",
 		Short: "Authenticate this agent with an agent token",
+		Long: "Save this copy's agent token, and optionally the manager address it reports to.\n\n" +
+			"The token can be given with --token, or in the BEACONCLAW_TOKEN environment\n" +
+			"variable to keep it out of the command line.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			token, _ := cmd.Flags().GetString("token")
+			endpoint, _ := cmd.Flags().GetString("endpoint")
 			if token == "" {
-				return fmt.Errorf("token required: beaconclaw auth --token <your-fleet-token>")
+				token = os.Getenv("BEACONCLAW_TOKEN")
+			}
+			if token == "" {
+				return fmt.Errorf("token required: %s auth --token <your-agent-token>", profile.BinaryName())
 			}
 
 			if err := config.SaveToken(token); err != nil {
 				return fmt.Errorf("save token: %w", err)
 			}
+			if endpoint != "" {
+				if err := config.SaveEndpoint(endpoint); err != nil {
+					return err
+				}
+				fmt.Printf("Manager address saved: %s\n", endpoint)
+			}
 
-			fmt.Println("Token saved. Run 'beaconclaw install' to register the service, then 'beaconclaw start'.")
+			fmt.Printf("Token saved. Run '%[1]s install' to register the service, then '%[1]s start'.\n", profile.BinaryName())
 			return nil
 		},
 	}
 
 	cmd.Flags().String("token", "", "Agent token (starts with bc_)")
-	_ = cmd.MarkFlagRequired("token")
+	cmd.Flags().String("endpoint", "", "Manager WebSocket address to report to (default "+config.DefaultManagerEndpoint+")")
 
 	return cmd
 }
