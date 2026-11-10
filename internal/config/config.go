@@ -44,6 +44,8 @@ type Config struct {
 	// Inventory: report the names of what the runtime has loaded. On unless
 	// switched off.
 	Inventory bool
+	// Usage: report daily counts of the runtime's activity. On unless switched off.
+	Usage bool
 }
 
 type fileConfig struct {
@@ -52,6 +54,7 @@ type fileConfig struct {
 	OpenClawPort int    `json:"openclaw_port,omitempty"`
 	Channel      string `json:"channel,omitempty"`
 	Inventory    *bool  `json:"inventory,omitempty"`
+	Usage        *bool  `json:"usage,omitempty"`
 }
 
 func Load() (*Config, error) {
@@ -62,6 +65,7 @@ func Load() (*Config, error) {
 		BufferCapacity:    DefaultBufferCapacity,
 		Channel:           ChannelStable,
 		Inventory:         true,
+		Usage:             true,
 	}
 
 	// Load from config file (lowest priority)
@@ -80,6 +84,9 @@ func Load() (*Config, error) {
 		}
 		if fc.Inventory != nil {
 			cfg.Inventory = *fc.Inventory
+		}
+		if fc.Usage != nil {
+			cfg.Usage = *fc.Usage
 		}
 	}
 
@@ -111,6 +118,11 @@ func Load() (*Config, error) {
 	if v := os.Getenv("BEACONCLAW_INVENTORY"); v != "" {
 		if on, err := strconv.ParseBool(v); err == nil {
 			cfg.Inventory = on
+		}
+	}
+	if v := os.Getenv("BEACONCLAW_USAGE"); v != "" {
+		if on, err := strconv.ParseBool(v); err == nil {
+			cfg.Usage = on
 		}
 	}
 

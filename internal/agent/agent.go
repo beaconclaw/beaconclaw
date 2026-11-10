@@ -29,6 +29,9 @@ const (
 	// starting it is first asked.
 	defaultInventoryEvery = 15 * time.Minute
 	defaultInventoryDelay = 20 * time.Second
+	// How often the runtime's usage is counted, and how soon after starting.
+	defaultUsageEvery = time.Hour
+	defaultUsageDelay = 2 * time.Minute
 )
 
 // Agent is the main daemon orchestrator.
@@ -48,6 +51,8 @@ type Agent struct {
 	ackCheck       time.Duration
 	inventoryEvery time.Duration
 	inventoryDelay time.Duration
+	usageEvery     time.Duration
+	usageDelay     time.Duration
 
 	// The fields below belong to the Run loop alone.
 	connecting bool
@@ -60,6 +65,8 @@ type Agent struct {
 	managerProtocol int
 	// inventory is waiting to go out with the next heartbeat.
 	inventory *heartbeat.Inventory
+	// usage is waiting to go out with the next heartbeat.
+	usage *heartbeat.Usage
 }
 
 func New(cfg *config.Config) *Agent {
@@ -75,6 +82,8 @@ func New(cfg *config.Config) *Agent {
 		ackCheck:       defaultAckCheck,
 		inventoryEvery: defaultInventoryEvery,
 		inventoryDelay: defaultInventoryDelay,
+		usageEvery:     defaultUsageEvery,
+		usageDelay:     defaultUsageDelay,
 		sent:           map[uint64]time.Time{},
 		attempts:       map[uint64]int{},
 	}
@@ -97,6 +106,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	ackTicker := time.NewTicker(a.ackCheck)
 	defer ackTicker.Stop()
 	inventories := a.watchInventory(ctx)
+	usages := a.watchUsage(ctx)
 
 	for {
 		select {
@@ -112,6 +122,10 @@ func (a *Agent) Run(ctx context.Context) error {
 		case inventory := <-inventories:
 			a.inventory = &inventory
 			log.Printf("inventory collected (%d skills, %d connections)", len(inventory.Skills), len(inventory.Connections))
+
+		case usage := <-usages:
+			a.usage = &usage
+			log.Printf("usage counted (%d days)", len(usage.Days))
 
 		case <-connected:
 			a.connecting = false
@@ -142,6 +156,8 @@ func (a *Agent) collect(ctx context.Context) {
 	// next collection replaces it.
 	payload.Inventory = a.inventory
 	a.inventory = nil
+	payload.Usage = a.usage
+	a.usage = nil
 	data, err := json.Marshal(payload)
 	if err != nil {
 		log.Printf("could not encode heartbeat seq=%d: %v", payload.Seq, err)
@@ -185,6 +201,44 @@ func (a *Agent) watchInventory(ctx context.Context) <-chan heartbeat.Inventory {
 			}
 			select {
 			case out <- inventory:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return out
+}
+
+// watchUsage counts how much the runtime was used, a while after starting and
+// then hourly: today so far, and yesterday, which is counted again after it
+// ends so its figures are final. Days the runtime could not count are left
+// out; nothing is sent when there are none. The channel is nil for a runtime
+// that cannot be asked, or when usage is switched off.
+func (a *Agent) watchUsage(ctx context.Context) <-chan heartbeat.Usage {
+	source, ok := a.runtime.(adapter.UsageCounter)
+	if !ok || !a.cfg.Usage || !adapter.Supports(a.runtime, adapter.CapUsage) {
+		return nil
+	}
+
+	out := make(chan heartbeat.Usage)
+	go func() {
+		wait := a.usageDelay
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(wait):
+			}
+			wait = a.usageEvery
+
+			now := time.Now().UTC()
+			today := now.Format("2006-01-02")
+			days := source.Usage(ctx, []string{now.AddDate(0, 0, -1).Format("2006-01-02"), today}, today)
+			if len(days) == 0 {
+				continue
+			}
+			select {
+			case out <- heartbeat.Usage{CollectedAt: time.Now().UTC(), Days: days}:
 			case <-ctx.Done():
 				return
 			}
@@ -318,6 +372,9 @@ func (a *Agent) registration() ws.Registration {
 	for _, c := range a.runtime.Capabilities() {
 		// Say only what this copy will in fact report.
 		if c == adapter.CapInventory && !a.cfg.Inventory {
+			continue
+		}
+		if c == adapter.CapUsage && !a.cfg.Usage {
 			continue
 		}
 		capabilities = append(capabilities, string(c))

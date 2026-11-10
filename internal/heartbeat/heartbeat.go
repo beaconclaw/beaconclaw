@@ -43,6 +43,9 @@ type Payload struct {
 	// Inventory is what the runtime has loaded. It is gathered far less often
 	// than a heartbeat, and is sent only with the heartbeat that follows.
 	Inventory *Inventory `json:"inventory,omitempty"`
+	// Usage is how much the runtime was used on recent days, as counts. Like
+	// the inventory, it is gathered rarely and sent with the next heartbeat.
+	Usage *Usage `json:"usage,omitempty"`
 	// Report is the neutral reading of the same probe. It is for the agent's
 	// own use and is not sent.
 	Report adapter.Report `json:"-"`
@@ -57,6 +60,12 @@ type Inventory struct {
 	// Revision is the commit of the runtime's working folder, or null when
 	// that folder is not a git checkout.
 	Revision *adapter.Revision `json:"revision"`
+}
+
+// Usage is the runtime's activity on recent days, as counts only.
+type Usage struct {
+	CollectedAt time.Time          `json:"collected_at"`
+	Days        []adapter.UsageDay `json:"days"`
 }
 
 // Collector assembles heartbeat payloads from system metrics and the runtime
