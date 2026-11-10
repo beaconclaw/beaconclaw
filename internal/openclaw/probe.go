@@ -135,16 +135,19 @@ func (p *Prober) checkReady(ctx context.Context) readinessResponse {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return readinessResponse{Ready: false}
-	}
+	ok := resp.StatusCode == http.StatusOK
 
+	// The gateway answers 503 with the same body when it is degraded. That is
+	// exactly when the names of what is failing matter, so the body is read
+	// whatever the status.
 	var r readinessResponse
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxReadyBody)).Decode(&r); err != nil {
-		// If we can't parse the body but got 200, consider it ready
-		return readinessResponse{Ready: true}
+		// No readable detail: the status alone decides.
+		return readinessResponse{Ready: ok}
 	}
 	r.Failing = boundNames(r.Failing)
+	// A status that says "not ready" wins over a body that claims otherwise.
+	r.Ready = r.Ready && ok
 	return r
 }
 
@@ -167,25 +170,44 @@ func (p *Prober) getVersion() string {
 	return v
 }
 
+// detectVersion finds the version of OpenClaw, preferring the copy the
+// gateway is actually running over whatever a command lookup would find. The
+// lookup path a service is given at install time goes stale, and has pointed
+// at nothing, or at a different copy, on real machines.
 func detectVersion() string {
+	// 1. The package the running gateway was started from.
+	if v := versionOfRunningGateway(); v != "" {
+		return v
+	}
+	// 2. The package behind the openclaw command, read from disk.
+	if v := versionOfInstalledCommand(); v != "" {
+		return v
+	}
+	// 3. Ask the command itself.
+	if v := versionFromCommand(); v != "" {
+		return v
+	}
+	return "unknown"
+}
+
+func versionFromCommand() string {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "openclaw", "--version")
-	out, err := cmd.Output()
+	out, err := exec.CommandContext(ctx, "openclaw", "--version").Output()
 	if err != nil {
-		return "unknown"
+		return ""
 	}
+	return parseVersionOutput(string(out))
+}
 
-	version := strings.TrimSpace(string(out))
-	// openclaw --version outputs "OpenClaw 2026.3.28 (f9b1079)" or "openclaw/2026.3.15"
+// parseVersionOutput reads "OpenClaw 2026.3.28 (f9b1079)" or "openclaw/2026.3.15".
+func parseVersionOutput(out string) string {
+	version := strings.TrimSpace(out)
 	if parts := strings.Fields(version); len(parts) >= 2 {
-		version = parts[1] // extract "2026.3.28" from "OpenClaw 2026.3.28 ..."
+		version = parts[1]
 	} else if idx := strings.LastIndex(version, "/"); idx >= 0 {
 		version = version[idx+1:]
 	}
-	if version == "" {
-		return "unknown"
-	}
-	return version
+	return cleanVersion(version)
 }
