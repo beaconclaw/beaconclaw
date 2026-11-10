@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os/exec"
 	"strings"
@@ -12,7 +13,7 @@ import (
 )
 
 const (
-	probeTimeout       = 3 * time.Second
+	probeTimeout           = 3 * time.Second
 	versionRecheckInterval = 10 * time.Minute
 )
 
@@ -43,11 +44,36 @@ type Prober struct {
 	versionChecked time.Time
 }
 
+const (
+	// The readiness answer is a few hundred bytes. Read no more than this.
+	maxReadyBody = 64 * 1024
+	// What is passed on to the manager is bounded too.
+	maxFailingChannels = 50
+	maxChannelNameLen  = 100
+)
+
+// boundNames caps how many channel names are relayed and how long each is.
+func boundNames(names []string) []string {
+	if len(names) > maxFailingChannels {
+		names = names[:maxFailingChannels]
+	}
+	for i, name := range names {
+		if len(name) > maxChannelNameLen {
+			names[i] = name[:maxChannelNameLen]
+		}
+	}
+	return names
+}
+
 func NewProber(port int) *Prober {
 	return &Prober{
 		port: port,
 		client: &http.Client{
 			Timeout: probeTimeout,
+			// The probe talks to the local gateway only. Never follow it elsewhere.
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
 		},
 	}
 }
@@ -114,10 +140,11 @@ func (p *Prober) checkReady(ctx context.Context) readinessResponse {
 	}
 
 	var r readinessResponse
-	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxReadyBody)).Decode(&r); err != nil {
 		// If we can't parse the body but got 200, consider it ready
 		return readinessResponse{Ready: true}
 	}
+	r.Failing = boundNames(r.Failing)
 	return r
 }
 

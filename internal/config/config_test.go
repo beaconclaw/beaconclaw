@@ -43,6 +43,32 @@ func TestValidate(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "unencrypted endpoint on another host",
+			cfg: Config{
+				Token:        "bc_test123",
+				Endpoint:     "ws://manager.example.com/ws",
+				OpenClawPort: 18789,
+			},
+			wantErr: true,
+		},
+		{
+			name: "unencrypted endpoint on this machine",
+			cfg: Config{
+				Token:        "bc_test123",
+				Endpoint:     "ws://127.0.0.1:3001/ws",
+				OpenClawPort: 18789,
+			},
+		},
+		{
+			name: "endpoint that is not a WebSocket address",
+			cfg: Config{
+				Token:        "bc_test123",
+				Endpoint:     "https://api.beaconclaw.ai/ws",
+				OpenClawPort: 18789,
+			},
+			wantErr: true,
+		},
+		{
 			name: "invalid port",
 			cfg: Config{
 				Token:        "bc_test123",

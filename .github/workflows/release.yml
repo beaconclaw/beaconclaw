@@ -10,14 +10,21 @@ on:
     tags:
       - "v*"
 
-permissions:
-  contents: write
+# Nothing is granted by default. Only the final publishing job may write.
+permissions: {}
 
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      prerelease: ${{ steps.tag.outputs.prerelease }}
+      make_latest: ${{ steps.tag.outputs.make_latest }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Classify the tag
         id: tag
@@ -34,9 +41,11 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          # A release is built from a clean toolchain, not a shared cache.
+          cache: false
 
       - name: Run tests
         run: go test ./...
@@ -47,12 +56,36 @@ jobs:
       - name: Write checksums
         run: make checksums && cat bin/checksums.txt
 
+      - name: Hand the files to the publishing job
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-files
+          path: |
+            bin/beaconclaw-*
+            bin/checksums.txt
+          if-no-files-found: error
+          retention-days: 1
+
+  # Publishing is the only step that can write to the repository. It runs no
+  # project code: it downloads what the build job produced and uploads it.
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Fetch the built files
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-files
+          path: bin
+
       - name: Create release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           generate_release_notes: true
-          prerelease: ${{ steps.tag.outputs.prerelease }}
-          make_latest: ${{ steps.tag.outputs.make_latest }}
+          prerelease: ${{ needs.build.outputs.prerelease }}
+          make_latest: ${{ needs.build.outputs.make_latest }}
           files: |
             bin/beaconclaw-linux-amd64
             bin/beaconclaw-linux-arm64
@@ -74,7 +107,7 @@ jobs:
             echo "::error::The latest release is '$tag', which is a pre-release."
             exit 1
           fi
-          if [[ "${{ steps.tag.outputs.prerelease }}" == "true" && "$tag" == "${GITHUB_REF_NAME}" ]]; then
+          if [[ "${{ needs.build.outputs.prerelease }}" == "true" && "$tag" == "${GITHUB_REF_NAME}" ]]; then
             echo "::error::Pre-release ${GITHUB_REF_NAME} was marked latest."
             exit 1
           fi

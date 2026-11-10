@@ -129,6 +129,21 @@ func TestBetaMovesOnToNewerStable(t *testing.T) {
 	}
 }
 
+func TestCheckSecure(t *testing.T) {
+	for address, wantErr := range map[string]bool{
+		"https://github.com/x":      false,
+		"http://127.0.0.1:8080/x":   false,
+		"http://localhost:8080/x":   false,
+		"http://releases.example/x": true,
+		"ftp://releases.example/x":  true,
+		"not a url":                 true,
+	} {
+		if err := checkSecure(address); (err != nil) != wantErr {
+			t.Errorf("checkSecure(%q) error = %v, wantErr %v", address, err, wantErr)
+		}
+	}
+}
+
 func TestUnknownChannel(t *testing.T) {
 	f := &fakeHost{}
 	if _, err := f.client(t).Latest(context.Background(), "nightly"); err == nil {
