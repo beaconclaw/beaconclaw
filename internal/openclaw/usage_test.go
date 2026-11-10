@@ -26,13 +26,17 @@ const freshAnswer = `notice printed first
      "usage": {"sessionFile": "/home/me/PRIVATE.jsonl", "messageCounts": {"user": 6, "assistant": 20, "toolCalls": 15}}},
     {"key": "k2", "channel": "slack", "usage": {"messageCounts": {"user": 2, "assistant": 10, "toolCalls": 9}}},
     {"key": "k3", "channel": "cron", "usage": {"messageCounts": {"user": 3, "assistant": 20, "toolCalls": 20}}},
-    {"key": "k4", "channel": "https://not-a-name.example/x", "usage": {"messageCounts": {"user": 0, "assistant": 0, "toolCalls": 0}}}
+    {"key": "k4", "channel": "https://not-a-name.example/x", "usage": {"messageCounts": {"user": 0, "assistant": 1, "toolCalls": 0}}},
+    {"key": "k5", "channel": "slack", "usage": {"messageCounts": {"user": 0, "assistant": 0, "toolCalls": 0}}},
+    {"key": "k6", "usage": {}}
   ]
 }`
 
 const refreshingAnswer = `{"cacheStatus": {"status": "refreshing", "pendingFiles": 47, "staleFiles": 47},
   "totals": {}, "aggregates": {"sessionCount": 0, "messages": {}}, "sessions": []}`
 
+// The answer lists six conversations, two of them quiet that day. The split
+// must add up to the day's own total of four.
 func TestParseUsageKeepsCountsAndNothingElse(t *testing.T) {
 	usage, ok := parseUsage([]byte(freshAnswer), "2026-06-01", true)
 	if !ok {
@@ -44,7 +48,7 @@ func TestParseUsageKeepsCountsAndNothingElse(t *testing.T) {
 		Tokens: 1200300, Cost: 4.6005,
 		Channels: []adapter.UsageChannel{
 			{Channel: "cron", Sessions: 1, UserMessages: 3, AssistantMessages: 20, ToolCalls: 20},
-			{Channel: "other", Sessions: 1},
+			{Channel: "other", Sessions: 1, AssistantMessages: 1},
 			{Channel: "slack", Sessions: 2, UserMessages: 8, AssistantMessages: 30, ToolCalls: 24},
 		},
 	}

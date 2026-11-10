@@ -171,6 +171,12 @@ func parseUsage(output []byte, day string, final bool) (adapter.UsageDay, bool) 
 
 	byChannel := map[string]*adapter.UsageChannel{}
 	for _, session := range answer.Sessions {
+		// The list also holds conversations that were quiet on this day. They
+		// are not part of the day's count, so they are not part of its split.
+		counts := session.Usage.MessageCounts
+		if whole(counts.User)+whole(counts.Assistant)+whole(counts.ToolCalls) == 0 {
+			continue
+		}
 		name := cleanName(session.Channel)
 		if name == "" {
 			name = otherChannel
