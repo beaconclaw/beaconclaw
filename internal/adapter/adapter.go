@@ -25,6 +25,9 @@ const (
 	// CapInventory: the adapter can list what the runtime has loaded. Such an
 	// adapter also implements Inventorier.
 	CapInventory Capability = "inventory"
+	// CapUsage: the adapter can count how much the runtime was used each day.
+	// Such an adapter also implements UsageCounter.
+	CapUsage Capability = "usage"
 )
 
 // Report is what an adapter found, in terms that apply to any runtime.
@@ -101,6 +104,45 @@ type Revision struct {
 // path. Like Probe, it must never fail.
 type Inventorier interface {
 	Inventory(ctx context.Context) Inventory
+}
+
+// UsageDay is how much a runtime was used on one UTC day, as counts only.
+type UsageDay struct {
+	// Date is the UTC day, as YYYY-MM-DD.
+	Date string `json:"date"`
+	// Final: the day is over, so these figures will not grow.
+	Final bool `json:"final"`
+	// Sessions is how many conversations had activity that day.
+	Sessions          int64 `json:"sessions"`
+	UserMessages      int64 `json:"user_messages"`
+	AssistantMessages int64 `json:"assistant_messages"`
+	ToolCalls         int64 `json:"tool_calls"`
+	Tokens            int64 `json:"tokens"`
+	// Cost is what the runtime says the day's model use cost, in US dollars.
+	Cost float64 `json:"cost"`
+	// Channels splits the day by where the conversations came from, such as a
+	// chat service or a schedule.
+	Channels []UsageChannel `json:"channels"`
+	// Truncated: the runtime returned as many conversations as were asked
+	// for, so the per-channel split may be missing some.
+	Truncated bool `json:"truncated,omitempty"`
+}
+
+// UsageChannel is one day's use from one source.
+type UsageChannel struct {
+	Channel           string `json:"channel"`
+	Sessions          int64  `json:"sessions"`
+	UserMessages      int64  `json:"user_messages"`
+	AssistantMessages int64  `json:"assistant_messages"`
+	ToolCalls         int64  `json:"tool_calls"`
+}
+
+// UsageCounter is implemented by an adapter with CapUsage. Counting may take
+// a minute or more, so it is called rarely and never on the heartbeat path.
+// It returns the days it could count; a day it could not is left out, never
+// reported as zero.
+type UsageCounter interface {
+	Usage(ctx context.Context, days []string, today string) []UsageDay
 }
 
 // Supports reports whether an adapter lists a capability.

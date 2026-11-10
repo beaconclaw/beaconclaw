@@ -30,7 +30,15 @@ type stockedRuntime struct {
 }
 
 func (stockedRuntime) Capabilities() []adapter.Capability {
-	return []adapter.Capability{adapter.CapHealth, adapter.CapInventory}
+	return []adapter.Capability{adapter.CapHealth, adapter.CapInventory, adapter.CapUsage}
+}
+
+func (s stockedRuntime) Usage(_ context.Context, days []string, today string) []adapter.UsageDay {
+	counted := []adapter.UsageDay{}
+	for _, day := range days {
+		counted = append(counted, adapter.UsageDay{Date: day, Final: day < today, Sessions: 3, UserMessages: 7})
+	}
+	return counted
 }
 
 func (s stockedRuntime) Inventory(context.Context) adapter.Inventory {
@@ -64,6 +72,7 @@ type manager struct {
 	connections int
 	received    []uint64 // heartbeat sequence numbers, in arrival order
 	inventories []string // the inventory of each heartbeat that carried one
+	usages      []string // the usage of each heartbeat that carried it
 }
 
 func newManager(t *testing.T) *manager {
@@ -96,6 +105,7 @@ func newManager(t *testing.T) *manager {
 				Payload struct {
 					Seq       uint64          `json:"seq"`
 					Inventory json.RawMessage `json:"inventory"`
+					Usage     json.RawMessage `json:"usage"`
 				} `json:"payload"`
 			}
 			if json.Unmarshal(data, &msg) != nil {
@@ -109,6 +119,9 @@ func newManager(t *testing.T) *manager {
 				m.received = append(m.received, msg.Payload.Seq)
 				if len(msg.Payload.Inventory) > 0 {
 					m.inventories = append(m.inventories, string(msg.Payload.Inventory))
+				}
+				if len(msg.Payload.Usage) > 0 {
+					m.usages = append(m.usages, string(msg.Payload.Usage))
 				}
 				silent := m.silent
 				hangUp := m.hangUpAfter > 0 && len(m.received) >= m.hangUpAfter
@@ -156,13 +169,15 @@ func startWith(t *testing.T, m *manager, outboxPath string, runtime adapter.Adap
 	client := ws.NewClient(m.url(), "bc_test")
 	client.SetTiming(ws.Timing{PingEvery: 50 * time.Millisecond, SilentAfter: 300 * time.Millisecond})
 	a := &Agent{
-		cfg:       &config.Config{InstanceID: "agent-1", Endpoint: m.url(), Inventory: inventory},
+		cfg:       &config.Config{InstanceID: "agent-1", Endpoint: m.url(), Inventory: inventory, Usage: inventory},
 		client:    client,
 		collector: heartbeat.NewCollector("agent-1", runtime),
 		runtime:   runtime,
 		// The first collection comes quickly; the second not within a test.
 		inventoryDelay: 60 * time.Millisecond,
 		inventoryEvery: time.Hour,
+		usageDelay:     80 * time.Millisecond,
+		usageEvery:     time.Hour,
 		outbox:         box,
 		interval:       40 * time.Millisecond,
 		ackTimeout:     200 * time.Millisecond,
@@ -381,5 +396,53 @@ func TestARuntimeThatCannotListItsInventoryIsNeverAsked(t *testing.T) {
 	defer m.mu.Unlock()
 	if len(m.inventories) != 0 {
 		t.Fatalf("sent %d inventories, want none", len(m.inventories))
+	}
+}
+
+func TestUsageGoesOutOnceWithTodayAndAFinalYesterday(t *testing.T) {
+	m := newManager(t)
+	startWith(t, m, filepath.Join(t.TempDir(), "outbox.json"), stockedRuntime{asked: &atomic.Int32{}}, true)
+
+	eventually(t, "usage to arrive", func() bool {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		return len(m.usages) == 1
+	})
+	_, before := m.snapshot()
+	eventually(t, "more heartbeats", func() bool {
+		_, now := m.snapshot()
+		return len(now) >= len(before)+4
+	})
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.usages) != 1 {
+		t.Fatalf("usage was sent %d times, want once per count", len(m.usages))
+	}
+	var got heartbeat.Usage
+	if err := json.Unmarshal([]byte(m.usages[0]), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Days) != 2 || !got.Days[0].Final || got.Days[1].Final || got.Days[0].Date >= got.Days[1].Date {
+		t.Fatalf("want yesterday (final) then today (not final), got %s", m.usages[0])
+	}
+	if got.Days[1].Sessions != 3 || got.Days[1].UserMessages != 7 || got.CollectedAt.IsZero() {
+		t.Fatalf("unexpected usage: %s", m.usages[0])
+	}
+}
+
+func TestNoUsageIsCountedOrSentWhenSwitchedOff(t *testing.T) {
+	m := newManager(t)
+	startWith(t, m, filepath.Join(t.TempDir(), "outbox.json"), stockedRuntime{asked: &atomic.Int32{}}, false)
+
+	eventually(t, "several heartbeats", func() bool {
+		_, received := m.snapshot()
+		return len(received) >= 6
+	})
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.usages) != 0 {
+		t.Fatalf("sent usage %d times, want none", len(m.usages))
 	}
 }
