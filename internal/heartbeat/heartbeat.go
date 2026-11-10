@@ -40,9 +40,23 @@ type Payload struct {
 	Runtime    Runtime       `json:"runtime"`
 	// Legacy is the adapter's own data under the name version 1 managers read.
 	Legacy any `json:"openclaw"`
+	// Inventory is what the runtime has loaded. It is gathered far less often
+	// than a heartbeat, and is sent only with the heartbeat that follows.
+	Inventory *Inventory `json:"inventory,omitempty"`
 	// Report is the neutral reading of the same probe. It is for the agent's
 	// own use and is not sent.
 	Report adapter.Report `json:"-"`
+}
+
+// Inventory is what the runtime has loaded, by name only. A null list means
+// the adapter could not find out; an empty one means there is nothing.
+type Inventory struct {
+	CollectedAt time.Time            `json:"collected_at"`
+	Skills      []adapter.Skill      `json:"skills"`
+	Connections []adapter.Connection `json:"connections"`
+	// Revision is the commit of the runtime's working folder, or null when
+	// that folder is not a git checkout.
+	Revision *adapter.Revision `json:"revision"`
 }
 
 // Collector assembles heartbeat payloads from system metrics and the runtime

@@ -41,6 +41,9 @@ type Config struct {
 	BufferCapacity    int
 	// Channel is the release track this profile updates from.
 	Channel string
+	// Inventory: report the names of what the runtime has loaded. On unless
+	// switched off.
+	Inventory bool
 }
 
 type fileConfig struct {
@@ -48,6 +51,7 @@ type fileConfig struct {
 	Endpoint     string `json:"endpoint,omitempty"`
 	OpenClawPort int    `json:"openclaw_port,omitempty"`
 	Channel      string `json:"channel,omitempty"`
+	Inventory    *bool  `json:"inventory,omitempty"`
 }
 
 func Load() (*Config, error) {
@@ -57,6 +61,7 @@ func Load() (*Config, error) {
 		HeartbeatInterval: DefaultHeartbeatSec,
 		BufferCapacity:    DefaultBufferCapacity,
 		Channel:           ChannelStable,
+		Inventory:         true,
 	}
 
 	// Load from config file (lowest priority)
@@ -72,6 +77,9 @@ func Load() (*Config, error) {
 		}
 		if ValidChannel(fc.Channel) {
 			cfg.Channel = fc.Channel
+		}
+		if fc.Inventory != nil {
+			cfg.Inventory = *fc.Inventory
 		}
 	}
 
@@ -99,6 +107,11 @@ func Load() (*Config, error) {
 	}
 	if v := os.Getenv("BEACONCLAW_ENDPOINT"); v != "" {
 		cfg.Endpoint = v
+	}
+	if v := os.Getenv("BEACONCLAW_INVENTORY"); v != "" {
+		if on, err := strconv.ParseBool(v); err == nil {
+			cfg.Inventory = on
+		}
 	}
 
 	// Load or generate instance ID

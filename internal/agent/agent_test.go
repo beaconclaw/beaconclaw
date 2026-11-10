@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -21,6 +22,25 @@ import (
 )
 
 type fakeRuntime struct{}
+
+// stockedRuntime is a runtime that can also say what it has loaded.
+type stockedRuntime struct {
+	fakeRuntime
+	asked *atomic.Int32
+}
+
+func (stockedRuntime) Capabilities() []adapter.Capability {
+	return []adapter.Capability{adapter.CapHealth, adapter.CapInventory}
+}
+
+func (s stockedRuntime) Inventory(context.Context) adapter.Inventory {
+	s.asked.Add(1)
+	return adapter.Inventory{
+		Skills:      []adapter.Skill{{Name: "summarise", Source: "bundled"}},
+		Connections: []adapter.Connection{{Kind: "channel", Name: "chat"}},
+		Revision:    &adapter.Revision{Commit: strings.Repeat("a", 40), Dirty: true},
+	}
+}
 
 func (fakeRuntime) Name() string { return "fake" }
 func (fakeRuntime) Capabilities() []adapter.Capability {
@@ -43,6 +63,7 @@ type manager struct {
 	hangUpAfter int  // close the connection after this many heartbeats, once
 	connections int
 	received    []uint64 // heartbeat sequence numbers, in arrival order
+	inventories []string // the inventory of each heartbeat that carried one
 }
 
 func newManager(t *testing.T) *manager {
@@ -73,7 +94,8 @@ func newManager(t *testing.T) *manager {
 			var msg struct {
 				Type    string `json:"type"`
 				Payload struct {
-					Seq uint64 `json:"seq"`
+					Seq       uint64          `json:"seq"`
+					Inventory json.RawMessage `json:"inventory"`
 				} `json:"payload"`
 			}
 			if json.Unmarshal(data, &msg) != nil {
@@ -85,6 +107,9 @@ func newManager(t *testing.T) *manager {
 			case "heartbeat":
 				m.mu.Lock()
 				m.received = append(m.received, msg.Payload.Seq)
+				if len(msg.Payload.Inventory) > 0 {
+					m.inventories = append(m.inventories, string(msg.Payload.Inventory))
+				}
 				silent := m.silent
 				hangUp := m.hangUpAfter > 0 && len(m.received) >= m.hangUpAfter
 				if hangUp {
@@ -122,20 +147,28 @@ func (m *manager) url() string { return "ws" + strings.TrimPrefix(m.srv.URL, "ht
 // outbox and a function that stops it.
 func start(t *testing.T, m *manager, outboxPath string) (*outbox.Outbox, func()) {
 	t.Helper()
+	return startWith(t, m, outboxPath, fakeRuntime{}, true)
+}
+
+func startWith(t *testing.T, m *manager, outboxPath string, runtime adapter.Adapter, inventory bool) (*outbox.Outbox, func()) {
+	t.Helper()
 	box := outbox.Open(outboxPath, 50)
 	client := ws.NewClient(m.url(), "bc_test")
 	client.SetTiming(ws.Timing{PingEvery: 50 * time.Millisecond, SilentAfter: 300 * time.Millisecond})
 	a := &Agent{
-		cfg:        &config.Config{InstanceID: "agent-1", Endpoint: m.url()},
-		client:     client,
-		collector:  heartbeat.NewCollector("agent-1", fakeRuntime{}),
-		runtime:    fakeRuntime{},
-		outbox:     box,
-		interval:   40 * time.Millisecond,
-		ackTimeout: 200 * time.Millisecond,
-		ackCheck:   20 * time.Millisecond,
-		sent:       map[uint64]time.Time{},
-		attempts:   map[uint64]int{},
+		cfg:       &config.Config{InstanceID: "agent-1", Endpoint: m.url(), Inventory: inventory},
+		client:    client,
+		collector: heartbeat.NewCollector("agent-1", runtime),
+		runtime:   runtime,
+		// The first collection comes quickly; the second not within a test.
+		inventoryDelay: 60 * time.Millisecond,
+		inventoryEvery: time.Hour,
+		outbox:         box,
+		interval:       40 * time.Millisecond,
+		ackTimeout:     200 * time.Millisecond,
+		ackCheck:       20 * time.Millisecond,
+		sent:           map[uint64]time.Time{},
+		attempts:       map[uint64]int{},
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -281,5 +314,72 @@ func TestHeartbeatsFromBeforeARestartAreSent(t *testing.T) {
 	_, received := m.snapshot()
 	if received[0] != 1 || received[1] != 2 || received[2] != 3 {
 		t.Errorf("expected the earlier heartbeats first, then numbering to continue: %v", received)
+	}
+}
+
+func TestTheInventoryGoesOutOnceWithTheNextHeartbeat(t *testing.T) {
+	m := newManager(t)
+	asked := &atomic.Int32{}
+	startWith(t, m, filepath.Join(t.TempDir(), "outbox.json"), stockedRuntime{asked: asked}, true)
+
+	eventually(t, "an inventory to arrive", func() bool {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		return len(m.inventories) == 1
+	})
+	// Several more heartbeats pass, and none repeats it.
+	_, before := m.snapshot()
+	eventually(t, "more heartbeats", func() bool {
+		_, now := m.snapshot()
+		return len(now) >= len(before)+4
+	})
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.inventories) != 1 {
+		t.Fatalf("the inventory was sent %d times, want once per collection", len(m.inventories))
+	}
+	var got heartbeat.Inventory
+	if err := json.Unmarshal([]byte(m.inventories[0]), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Skills) != 1 || got.Skills[0].Name != "summarise" || len(got.Connections) != 1 || got.Revision == nil || !got.Revision.Dirty {
+		t.Fatalf("unexpected inventory: %s", m.inventories[0])
+	}
+	if got.CollectedAt.IsZero() {
+		t.Fatal("the inventory does not say when it was collected")
+	}
+}
+
+func TestNoInventoryIsCollectedOrSentWhenSwitchedOff(t *testing.T) {
+	m := newManager(t)
+	asked := &atomic.Int32{}
+	startWith(t, m, filepath.Join(t.TempDir(), "outbox.json"), stockedRuntime{asked: asked}, false)
+
+	eventually(t, "several heartbeats", func() bool {
+		_, received := m.snapshot()
+		return len(received) >= 6
+	})
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if asked.Load() != 0 || len(m.inventories) != 0 {
+		t.Fatalf("asked the runtime %d times and sent %d inventories, want none", asked.Load(), len(m.inventories))
+	}
+}
+
+func TestARuntimeThatCannotListItsInventoryIsNeverAsked(t *testing.T) {
+	m := newManager(t)
+	start(t, m, filepath.Join(t.TempDir(), "outbox.json"))
+
+	eventually(t, "several heartbeats", func() bool {
+		_, received := m.snapshot()
+		return len(received) >= 4
+	})
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.inventories) != 0 {
+		t.Fatalf("sent %d inventories, want none", len(m.inventories))
 	}
 }

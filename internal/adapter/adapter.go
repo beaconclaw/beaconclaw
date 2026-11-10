@@ -22,6 +22,9 @@ const (
 	CapUptime Capability = "uptime"
 	// CapVersion: the adapter can report the runtime's version.
 	CapVersion Capability = "version"
+	// CapInventory: the adapter can list what the runtime has loaded. Such an
+	// adapter also implements Inventorier.
+	CapInventory Capability = "inventory"
 )
 
 // Report is what an adapter found, in terms that apply to any runtime.
@@ -57,6 +60,47 @@ type Adapter interface {
 	// Probe checks the runtime once. It must return within a few seconds and
 	// must never fail: a runtime that cannot be reached is a Report, not an error.
 	Probe(ctx context.Context) Report
+}
+
+// Inventory is what a runtime has loaded, by name only. A nil list means the
+// adapter could not find out; an empty one means there is nothing.
+type Inventory struct {
+	// Skills are the things the runtime can currently do.
+	Skills []Skill
+	// Connections are the outside systems the runtime is set up to reach.
+	Connections []Connection
+	// Revision is the commit of the runtime's working folder, when that folder
+	// is a git checkout. Nil otherwise.
+	Revision *Revision
+}
+
+// Skill names one thing a runtime can do.
+type Skill struct {
+	Name string `json:"name"`
+	// Source says where the skill comes from, in the runtime's own words, such
+	// as whether it ships with the runtime or was added on this machine.
+	Source string `json:"source,omitempty"`
+}
+
+// Connection names one outside system a runtime is set up to reach.
+type Connection struct {
+	// Kind groups connections, such as "channel" for a chat service.
+	Kind string `json:"kind"`
+	Name string `json:"name"`
+}
+
+// Revision identifies the contents of the runtime's working folder.
+type Revision struct {
+	Commit string `json:"commit"`
+	// Dirty: the folder has changes that are not in that commit.
+	Dirty bool `json:"dirty"`
+}
+
+// Inventorier is implemented by an adapter with CapInventory. Listing may take
+// much longer than a probe, so it is called rarely and never on the heartbeat
+// path. Like Probe, it must never fail.
+type Inventorier interface {
+	Inventory(ctx context.Context) Inventory
 }
 
 // Supports reports whether an adapter lists a capability.
