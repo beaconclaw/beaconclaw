@@ -40,6 +40,7 @@ What it does not do, as of this version:
 - For the inventory it runs `openclaw skills list --json` and keeps each usable skill's name and source. A skill's description and contents are not sent. A name that is not a short plain label (a path, an address, a sentence) is left out.
 - If the workspace folder is a git checkout it runs `git rev-parse HEAD` and `git status --porcelain` there, and sends the commit and a yes or no for uncommitted changes. It does not send the repository's address, branch names, file names or contents.
 - To learn the OpenClaw version it looks for the running gateway among the machine's processes, by command line, and reads the `name` and `version` fields of that copy's `package.json`. Command lines of other processes are not kept or sent. If that finds nothing, it follows the `openclaw` command to its package and reads the same two fields, and as a last resort runs `openclaw --version`.
+- When you run `beaconclaw maintenance start` or `end`, it sends one request to the manager with the agent's token: the reason you typed and the length in minutes, or nothing for `end`. This is the only thing it sends that you type yourself. The token can only put its own agent into maintenance.
 - It cannot receive or run commands from the manager.
 - It opens no listening ports.
 
@@ -124,6 +125,10 @@ beaconclaw start
 beaconclaw stop
 beaconclaw restart
 
+# Tell the manager this agent is being worked on, then that the work is done
+beaconclaw maintenance start --reason "runtime upgrade" --for 2h
+beaconclaw maintenance end
+
 # Check status
 beaconclaw status
 
@@ -135,6 +140,17 @@ beaconclaw version
 ```
 
 `beaconclaw install` registers a service for the current user, not a system-wide one: a systemd user unit on Linux, a launchd agent on macOS, and a scheduled task on Windows. It needs no root access. `restart` restarts the BeaconClaw agent, not OpenClaw.
+
+### Maintenance
+
+While an agent is in maintenance, the manager holds back its alerts and leaves the time out of its uptime. Start it before working on the agent and end it after:
+
+```sh
+beaconclaw maintenance start --reason "runtime upgrade" --for 2h   # --for defaults to 1h; at most 14 days
+beaconclaw maintenance end
+```
+
+Starting again while it is already in maintenance keeps the one window, made longer if the new request runs later. If you forget to end it, it ends by itself at the time given.
 
 ### Profiles
 
