@@ -30,6 +30,9 @@ type Registration struct {
 	Version    string `json:"version"`
 	// Runtime says which runtime this agent watches and what it can report.
 	Runtime RegistrationRuntime `json:"runtime"`
+	// Actions are the remote actions switched on on this machine. Left out
+	// when there are none.
+	Actions []string `json:"actions,omitempty"`
 }
 
 // RegistrationRuntime describes the runtime adapter in use.
@@ -40,7 +43,7 @@ type RegistrationRuntime struct {
 
 // Message is something the manager sent to the agent.
 type Message struct {
-	// Type is "register_ack" or "heartbeat_ack". Other types are ignored by
+	// Type is "register_ack", "heartbeat_ack" or "action". Other types are ignored by
 	// the agent, so a newer manager can add messages without breaking it.
 	Type string `json:"type"`
 	// Seq is the heartbeat being acknowledged, on a "heartbeat_ack".
@@ -48,6 +51,14 @@ type Message struct {
 	// Protocol is the newest protocol version the manager understands, on a
 	// "register_ack". A manager from before version 2 sends none.
 	Protocol int `json:"protocol"`
+	// AgentID is the manager's own ID for this agent, on a "register_ack",
+	// and the agent a command is meant for, on an "action".
+	AgentID string `json:"agent_id"`
+	// ID, Action and ExpiresAt describe an "action": a request to do one of
+	// a fixed list of things. There is no field for a command line.
+	ID        string `json:"id"`
+	Action    string `json:"action"`
+	ExpiresAt string `json:"expires_at"`
 }
 
 // maxMessageBytes bounds what the agent will read from the manager. Its

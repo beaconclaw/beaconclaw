@@ -1,6 +1,6 @@
 bin/
 dist/
-beaconclaw
+/beaconclaw
 *.exe
 *.dll
 *.so

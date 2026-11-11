@@ -160,3 +160,13 @@ func Supports(a Adapter, capability Capability) bool {
 	}
 	return false
 }
+
+// Restarter is implemented by an adapter that can restart its runtime's
+// gateway the way an operator would by hand. It is used only for the remote
+// action of that name, which is off unless the machine's owner switches it on.
+type Restarter interface {
+	// RestartGateway asks the runtime to restart its gateway and returns when
+	// the runtime's own command has finished. It takes no arguments: what is
+	// run is fixed.
+	RestartGateway(ctx context.Context) error
+}

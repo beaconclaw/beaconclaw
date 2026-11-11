@@ -22,6 +22,7 @@ Describe a change by what it does and why, in terms a stranger can follow.
 5. **Profiles are isolated.** A command acts on one profile and must never touch another profile's config, binary or service.
 6. **An update must not strand a machine.** `update` verifies the checksum, proves the new binary runs, replaces it in one step and restores the old one if the service does not come back. Keep those guarantees, and keep their tests.
 7. **No automatic updates.** A copy changes version only when someone runs `update` or the installer.
+8. **Remote actions are a fixed list, off by default.** The manager may only name an action in `internal/actions`. Never add a field that carries a command line, arguments, a path or a script, and never a way for the manager, an environment variable or an update to switch an action on: only the `actions` command on the machine does that. Every request is checked on the machine (this agent, switched on, not expired, not seen before) and recorded there, whatever the manager says. A new action needs its own entry in the README's list of what it does and sends.
 8. **Runs as the user.** The service is a per-user service and needs no root access.
 
 ## Release tracks
