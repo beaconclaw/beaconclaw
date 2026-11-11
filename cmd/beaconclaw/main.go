@@ -17,6 +17,7 @@ import (
 	"github.com/beaconclaw/beaconclaw/internal/daemon"
 	"github.com/beaconclaw/beaconclaw/internal/maintenance"
 	"github.com/beaconclaw/beaconclaw/internal/openclaw"
+	"github.com/beaconclaw/beaconclaw/internal/outbox"
 	"github.com/beaconclaw/beaconclaw/internal/profile"
 	"github.com/beaconclaw/beaconclaw/internal/update"
 )
@@ -314,6 +315,9 @@ func statusCmd() *cobra.Command {
 			} else {
 				fmt.Println("Daemon:       not installed")
 			}
+			// Heartbeats collected but not yet confirmed by the manager. One or two
+			// is normal: the newest is usually still on its way.
+			fmt.Printf("Waiting:      %s\n", waitingHeartbeats(outbox.Open(config.OutboxPath(), cfg.BufferCapacity).Len()))
 			fmt.Println()
 
 			runtime := openclaw.NewAdapter(cfg.OpenClawPort)
@@ -339,6 +343,18 @@ func statusCmd() *cobra.Command {
 
 			return nil
 		},
+	}
+}
+
+// waitingHeartbeats says how many heartbeats the manager has not confirmed yet.
+func waitingHeartbeats(count int) string {
+	switch {
+	case count == 0:
+		return "none, the manager has confirmed every heartbeat"
+	case count == 1:
+		return "1 heartbeat not yet confirmed by the manager"
+	default:
+		return fmt.Sprintf("%d heartbeats not yet confirmed by the manager", count)
 	}
 }
 
