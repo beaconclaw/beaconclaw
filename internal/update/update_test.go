@@ -18,9 +18,13 @@ func TestParseAndCompare(t *testing.T) {
 	// Ascending order.
 	order := []string{
 		"v0.0.11",
+		// Built from source after v0.0.11: newer than it, older than the next tag.
+		"v0.0.11-1-g181b7e9",
+		"v0.0.11-12-g181b7e9-dirty",
 		"v0.1.0-alpha",
 		"v0.1.0-beta.1",
 		"v0.1.0-beta.2",
+		"v0.1.0-beta.2-3-gabcdef0",
 		"v0.1.0-beta.10",
 		"v0.1.0-rc.1",
 		"v0.1.0",
@@ -48,6 +52,17 @@ func TestParseAndCompare(t *testing.T) {
 	}
 	if v, _ := ParseVersion("0.1.0-beta.1"); !v.IsPrerelease() {
 		t.Error("0.1.0-beta.1 should be a pre-release")
+	}
+	// A source build takes its kind from the tag it was built after.
+	if v, _ := ParseVersion("v0.0.11-1-g181b7e9"); v.IsPrerelease() || v.Ahead != 1 {
+		t.Errorf("v0.0.11-1-g181b7e9 should be one commit after a stable release, got %+v", v)
+	}
+	if v, _ := ParseVersion("v0.1.0-beta.2-3-gabcdef0"); !v.IsPrerelease() || v.Ahead != 3 {
+		t.Errorf("v0.1.0-beta.2-3-gabcdef0 should be three commits after a pre-release, got %+v", v)
+	}
+	// A tree with uncommitted changes on the tag itself is that release.
+	if v, err := ParseVersion("v0.1.0-dirty"); err != nil || v.Ahead != 0 || v.IsPrerelease() {
+		t.Errorf("v0.1.0-dirty should read as v0.1.0, got %+v, %v", v, err)
 	}
 }
 
