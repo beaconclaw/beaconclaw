@@ -64,6 +64,7 @@ func main() {
 	root.AddCommand(statusCmd())
 	root.AddCommand(inventoryCmd())
 	root.AddCommand(maintenanceCmd())
+	root.AddCommand(actionsCmd())
 	root.AddCommand(updateCmd())
 	root.AddCommand(channelCmd())
 	root.AddCommand(versionCmd())

@@ -45,7 +45,8 @@ What it does not do, as of this version:
 - If the workspace folder is a git checkout it runs `git rev-parse HEAD` and `git status --porcelain` there, and sends the commit and a yes or no for uncommitted changes. It does not send the repository's address, branch names, file names or contents.
 - To learn the OpenClaw version it looks for the running gateway among the machine's processes, by command line, and reads the `name` and `version` fields of that copy's `package.json`. Command lines of other processes are not kept or sent. If that finds nothing, it follows the `openclaw` command to its package and reads the same two fields, and as a last resort runs `openclaw --version`.
 - When you run `beaconclaw maintenance start` or `end`, it sends one request to the manager with the agent's token: the reason you typed and the length in minutes, or nothing for `end`. This is the only thing it sends that you type yourself. The token can only put its own agent into maintenance.
-- It cannot receive or run commands from the manager.
+- **Out of the box it cannot receive or run anything from the manager.** Remote actions are an add-on you switch on yourself, one action at a time; see [Remote actions](#remote-actions). Even then the manager can only name an action from a short fixed list. It cannot send a command line, and it cannot switch an action on.
+- With a remote action switched on, and only when one is asked for, it sends back the result: for `diagnostics`, each check's name, whether it passed and a short state such as a version or "41% used"; for `restart_gateway`, whether the gateway answered again and how many seconds that took. A refused request sends back the reason. When it connects it also sends the names of the actions you have switched on.
 - It opens no listening ports.
 
 Heartbeats the manager has not yet acknowledged are kept in `outbox.json` in the agent's config folder, readable only by your user, so an outage or a restart does not lose them. By default up to two hours' worth are kept; the oldest are dropped first. They are removed as soon as the manager confirms them.
@@ -212,6 +213,33 @@ Off by default. To also send the names of declared credentials the list does not
 
 Usage is on by default. To stop it, set `"usage": false` in the config file or `BEACONCLAW_USAGE=false` in the service's environment, then restart the agent. The inventory and usage switches are independent.
 
+### Remote actions
+
+An add-on, **off unless you switch it on on this machine**. With an action switched on, someone who operates the agent can ask this machine to do that one thing from the manager, without signing in to the machine.
+
+| Action | What it does here |
+| :-- | :-- |
+| `diagnostics` | Runs the agent's own checks again (gateway answering and ready, versions, memory, disk) and sends back each check's name and state. Changes nothing. |
+| `restart_gateway` | Runs `openclaw gateway restart`, the command you would run by hand, then reports whether the gateway answered again within a minute. Conversations in progress are cut off. |
+
+```sh
+beaconclaw actions                              # what is on and off
+beaconclaw actions allow diagnostics            # switch one on
+beaconclaw actions allow restart_gateway
+beaconclaw actions disallow --all               # switch everything off
+```
+
+What keeps this safe:
+
+- **Only this command switches an action on.** There is no setting for it on the manager and no environment variable. The choice is kept in this profile's config file.
+- **The list is fixed in the code.** The manager sends the name of an action and nothing else. There is no field for a command line or arguments, and an unknown name is refused.
+- **Each request is checked here**, whatever the manager says: it must be for this agent, switched on, not expired (the manager allows one minute), and not seen before. At most one restart every five minutes.
+- **Every request is recorded on this machine**, carried out or refused, in `actions.log` in the agent's config folder. That file is your copy; it is never sent.
+- **Nothing is queued.** A request reaches the agent only while it is connected, over the connection the agent itself opened. No port is opened.
+- What comes back is names and states: no logs, no output from the runtime, no conversation content.
+
+To build a copy that can never perform a remote action, whatever its settings say: `go build -tags noactions ./cmd/beaconclaw`.
+
 ### Config File
 
 Optional. Place at `~/.beaconclaw/config.json`:
@@ -273,6 +301,7 @@ ssh user@your-vm 'chmod +x ~/.local/bin/beaconclaw && beaconclaw restart'
 ```
 cmd/beaconclaw/      CLI entrypoint
 internal/
+  actions/           Remote actions: the fixed list, and the checks before one is carried out
   adapter/           The boundary between the agent and the runtime it watches
   agent/             Daemon orchestrator
   config/            Config loading and validation

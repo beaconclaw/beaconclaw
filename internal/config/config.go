@@ -14,6 +14,7 @@ import (
 
 	"github.com/beaconclaw/beaconclaw/internal/profile"
 
+	"github.com/beaconclaw/beaconclaw/internal/actions"
 	"github.com/beaconclaw/beaconclaw/internal/openclaw"
 )
 
@@ -49,6 +50,9 @@ type Config struct {
 	// InventoryAllNames: also send the names of declared credentials the
 	// catalogue does not recognise. Off unless switched on, on this machine.
 	InventoryAllNames bool
+	// Actions are the remote actions switched on on this machine. Empty
+	// unless someone here switched one on; the manager cannot.
+	Actions []string
 }
 
 type fileConfig struct {
@@ -60,6 +64,9 @@ type fileConfig struct {
 	Usage        *bool  `json:"usage,omitempty"`
 	// InventoryAllNames is off unless set to true here.
 	InventoryAllNames *bool `json:"inventory_all_names,omitempty"`
+	// Actions are the remote actions switched on here. There is no
+	// environment variable for this: it is set only by the actions command.
+	Actions []string `json:"actions,omitempty"`
 }
 
 func Load() (*Config, error) {
@@ -96,6 +103,7 @@ func Load() (*Config, error) {
 		if fc.Usage != nil {
 			cfg.Usage = *fc.Usage
 		}
+		cfg.Actions = actions.Normalize(fc.Actions)
 	}
 
 	// Ask the runtime's adapter where the runtime listens.
@@ -243,6 +251,31 @@ func LoadChannel() string {
 		return fc.Channel
 	}
 	return ChannelStable
+}
+
+// LoadActions returns the remote actions switched on in this profile.
+func LoadActions() []string {
+	if fc, err := loadFileConfig(); err == nil {
+		return actions.Normalize(fc.Actions)
+	}
+	return nil
+}
+
+// SaveActions records which remote actions are switched on in this profile,
+// keeping other settings. Unknown names are dropped.
+func SaveActions(names []string) error {
+	fc, _ := loadFileConfig()
+	if fc == nil {
+		fc = &fileConfig{}
+	}
+	fc.Actions = actions.Normalize(names)
+	return writeFileConfig(fc)
+}
+
+// ActionsLogPath is where this profile records every remote action it was
+// asked for, so the machine's owner can check without asking the manager.
+func ActionsLogPath() string {
+	return filepath.Join(stateDirectory(), "actions.log")
 }
 
 // SaveChannel records this profile's release track, keeping other settings.

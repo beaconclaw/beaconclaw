@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/beaconclaw/beaconclaw/internal/actions"
 	"github.com/beaconclaw/beaconclaw/internal/adapter"
 	"github.com/beaconclaw/beaconclaw/internal/catalogue"
 	"github.com/beaconclaw/beaconclaw/internal/config"
@@ -68,6 +69,17 @@ type Agent struct {
 	inventory *heartbeat.Inventory
 	// usage is waiting to go out with the next heartbeat.
 	usage *heartbeat.Usage
+	// managerAgentID is the manager's own ID for this agent, as it said when
+	// the agent registered. A command for any other agent is refused.
+	managerAgentID string
+	// gate decides which remote actions this machine accepts.
+	gate *actions.Gate
+	// actionsLog is this machine's own record of remote actions. Empty
+	// keeps no file.
+	actionsLog string
+	// restartSettle and restartPoll override the times used after a restart.
+	restartSettle time.Duration
+	restartPoll   time.Duration
 }
 
 func New(cfg *config.Config) *Agent {
@@ -77,6 +89,8 @@ func New(cfg *config.Config) *Agent {
 		client:         ws.NewClient(cfg.Endpoint, cfg.Token),
 		collector:      heartbeat.NewCollector(cfg.InstanceID, runtime),
 		runtime:        runtime,
+		gate:           actions.NewGate(cfg.Actions),
+		actionsLog:     config.ActionsLogPath(),
 		outbox:         outbox.Open(config.OutboxPath(), cfg.BufferCapacity),
 		interval:       time.Duration(cfg.HeartbeatInterval) * time.Second,
 		ackTimeout:     defaultAckTimeout,
@@ -309,7 +323,10 @@ func (a *Agent) handle(m ws.Message) {
 		if a.managerProtocol < 1 {
 			a.managerProtocol = 1
 		}
+		a.managerAgentID = m.AgentID
 		log.Printf("registered with manager (manager protocol %d, agent protocol %d)", a.managerProtocol, heartbeat.ProtocolVersion)
+	case "action":
+		a.handleAction(m)
 	}
 }
 
@@ -403,6 +420,7 @@ func (a *Agent) registration() ws.Registration {
 		Arch:       runtime.GOARCH,
 		Hostname:   hostname,
 		Version:    Version,
+		Actions:    a.allowedActions(),
 	}
 }
 

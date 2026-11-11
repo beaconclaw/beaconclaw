@@ -15,6 +15,9 @@ Say what you found, how to reproduce it, and which version it affects
 
 - The agent in this repository: what it reads on the machine, what it sends,
   how it updates itself, and how it stores its token.
+- Remote actions: anything that makes the agent do more than the fixed
+  actions its owner switched on, act on a request it should have refused, or
+  switch an action on without the `actions` command on the machine.
 - The install scripts and the release workflow that builds the binaries.
 
 ## Supported versions

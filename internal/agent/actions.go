@@ -1,0 +1,188 @@
+package agent
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"os"
+	"time"
+
+	"github.com/beaconclaw/beaconclaw/internal/actions"
+	"github.com/beaconclaw/beaconclaw/internal/adapter"
+	"github.com/beaconclaw/beaconclaw/internal/heartbeat"
+	"github.com/beaconclaw/beaconclaw/internal/ws"
+)
+
+// How long after a restart the gateway is given to answer again, and how
+// often it is asked.
+const (
+	restartSettle = 60 * time.Second
+	restartPoll   = 3 * time.Second
+)
+
+// actionResult is the agent's answer to an action. Result holds names and
+// states only: never the runtime's output, logs or anything it was told.
+type actionResult struct {
+	Type    string `json:"type"`
+	ID      string `json:"id"`
+	OK      bool   `json:"ok"`
+	Refused bool   `json:"refused,omitempty"`
+	Result  any    `json:"result,omitempty"`
+}
+
+// allowedActions is what this copy tells the manager is switched on here.
+func (a *Agent) allowedActions() []string {
+	if !actions.Enabled {
+		return nil
+	}
+	return actions.Normalize(a.cfg.Actions)
+}
+
+// handleAction decides whether to do what the manager asked, records it on
+// this machine either way, and answers. The work itself runs on the side, so
+// a slow restart never holds up heartbeats.
+func (a *Agent) handleAction(m ws.Message) {
+	expires, _ := time.Parse(time.RFC3339, m.ExpiresAt)
+	command := actions.Command{ID: m.ID, AgentID: m.AgentID, Action: m.Action, ExpiresAt: expires}
+
+	if a.gate == nil {
+		a.gate = actions.NewGate(a.cfg.Actions)
+	}
+	if err := a.gate.Check(command, a.managerAgentID, time.Now()); err != nil {
+		a.recordAction(command, "refused: "+err.Error())
+		a.answer(actionResult{ID: m.ID, Refused: true, Result: map[string]string{"reason": err.Error()}})
+		return
+	}
+
+	a.recordAction(command, "started")
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), restartSettle+2*time.Minute)
+		defer cancel()
+		result := a.perform(ctx, command.Action)
+		outcome := "failed"
+		if result.OK {
+			outcome = "succeeded"
+		}
+		a.recordAction(command, outcome)
+		result.ID = m.ID
+		a.answer(result)
+	}()
+}
+
+func (a *Agent) answer(result actionResult) {
+	result.Type = "action_result"
+	if err := a.client.SendJSON(result); err != nil {
+		log.Printf("could not send the result of action %s: %v", result.ID, err)
+	}
+}
+
+// perform carries out one action. The switch is the whole list: there is no
+// way to reach anything else from here.
+func (a *Agent) perform(ctx context.Context, action string) actionResult {
+	switch action {
+	case actions.Diagnostics:
+		checks := a.diagnose(ctx)
+		ok := true
+		for _, check := range checks {
+			ok = ok && check.OK
+		}
+		return actionResult{OK: ok, Result: map[string]any{"checks": checks}}
+
+	case actions.RestartGateway:
+		restarter, can := a.runtime.(adapter.Restarter)
+		if !can {
+			return actionResult{Result: map[string]string{"reason": "this runtime cannot be restarted by the agent"}}
+		}
+		if err := restarter.RestartGateway(ctx); err != nil {
+			return actionResult{Result: map[string]string{"reason": "the runtime's restart command failed"}}
+		}
+		back, waited := a.waitForGateway(ctx)
+		return actionResult{OK: back, Result: map[string]any{
+			"gateway_answering": back,
+			"waited_seconds":    int(waited.Seconds()),
+		}}
+
+	default:
+		return actionResult{Result: map[string]string{"reason": "unknown action"}}
+	}
+}
+
+// settle and poll are the times used after a restart. Tests shorten them.
+func (a *Agent) settle() time.Duration {
+	if a.restartSettle > 0 {
+		return a.restartSettle
+	}
+	return restartSettle
+}
+
+func (a *Agent) poll() time.Duration {
+	if a.restartPoll > 0 {
+		return a.restartPoll
+	}
+	return restartPoll
+}
+
+// waitForGateway asks the runtime whether it is answering until it is, or the
+// time allowed runs out.
+func (a *Agent) waitForGateway(ctx context.Context) (bool, time.Duration) {
+	started := time.Now()
+	deadline := started.Add(a.settle())
+	for {
+		probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		report := a.runtime.Probe(probeCtx)
+		cancel()
+		if report.Healthy {
+			return true, time.Since(started)
+		}
+		if time.Now().After(deadline) {
+			return false, time.Since(started)
+		}
+		select {
+		case <-ctx.Done():
+			return false, time.Since(started)
+		case <-time.After(a.poll()):
+		}
+	}
+}
+
+// diagnose runs the agent's own checks once more: the same ones a heartbeat
+// makes, reported as a list a person can read.
+func (a *Agent) diagnose(ctx context.Context) []actions.Check {
+	probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	report := a.runtime.Probe(probeCtx)
+	cancel()
+	system := heartbeat.CollectSystemMetrics()
+
+	checks := []actions.Check{
+		{Name: "runtime_present", OK: report.Present},
+		{Name: "gateway_answering", OK: report.Healthy},
+		{Name: "gateway_ready", OK: report.Ready},
+	}
+	for _, failing := range report.Failing {
+		checks = append(checks, actions.Check{Name: "channel", OK: false, Note: failing})
+	}
+	return append(checks,
+		actions.Check{Name: "runtime_version", OK: report.Version != "", Note: report.Version},
+		actions.Check{Name: "agent_version", OK: true, Note: Version},
+		actions.Check{Name: "memory", OK: system.MemoryPercent < 95, Note: fmt.Sprintf("%.0f%% used", system.MemoryPercent)},
+		actions.Check{Name: "disk", OK: system.DiskPercent < 95, Note: fmt.Sprintf("%.0f%% used", system.DiskPercent)},
+		actions.Check{Name: "manager_connection", OK: a.client.IsConnected()},
+	)
+}
+
+// recordAction writes one line to this machine's own record of remote
+// actions, and to the agent's log. The file is the machine owner's copy: it
+// is never sent anywhere.
+func (a *Agent) recordAction(command actions.Command, what string) {
+	line := fmt.Sprintf("%s action=%s id=%s %s", time.Now().UTC().Format(time.RFC3339), command.Action, command.ID, what)
+	log.Printf("remote action: %s", line)
+	if a.actionsLog == "" {
+		return
+	}
+	file, err := os.OpenFile(a.actionsLog, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+	fmt.Fprintln(file, line)
+}
