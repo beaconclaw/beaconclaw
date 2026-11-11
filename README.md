@@ -189,6 +189,7 @@ Every command acts on one profile and leaves the others alone. Choose the profil
 | `BEACONCLAW_OPENCLAW_PORT` | Override OpenClaw gateway port | auto-detected |
 | `BEACONCLAW_PROFILE` | Profile to act on | default profile |
 | `BEACONCLAW_INVENTORY` | `false` to stop reporting skill and connection names | `true` |
+| `BEACONCLAW_INVENTORY_ALL_NAMES` | `true` to also send the names of declared credentials the list does not recognise | `false` |
 | `BEACONCLAW_USAGE` | `false` to stop reporting daily usage counts | `true` |
 
 `beaconclaw update` also reads `GITHUB_TOKEN` if it is set, and sends it to GitHub only to raise the download rate limit. `BEACONCLAW_RELEASES_API` and `BEACONCLAW_RELEASES_DOWNLOAD` point the updater at another release host for testing; it must be an `https` address unless it is on this machine.
