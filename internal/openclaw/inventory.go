@@ -46,14 +46,16 @@ func cleanName(name string) string {
 }
 
 // Inventory lists the skills OpenClaw has loaded, the systems it is set up to
-// reach and the commit of its workspace. It sends names only: never a skill's
-// contents, a setting's value or a credential.
+// reach, the names of the credentials its skills declare and have, and the
+// commit of its workspace. Names only: never a skill's contents, a setting's
+// value or a credential. It asks OpenClaw; it never opens an environment file.
 func (a *Adapter) Inventory(ctx context.Context) adapter.Inventory {
 	inventory := adapter.Inventory{}
 
 	workspace := ""
 	if output, err := runSkillsList(ctx); err == nil {
 		inventory.Skills, workspace = parseSkills(output)
+		inventory.Credentials = parseCredentials(output)
 	}
 
 	config := readConfig()
@@ -154,6 +156,65 @@ func parseSkills(output []byte) ([]adapter.Skill, string) {
 		skills = skills[:maxInventoryItems]
 	}
 	return skills, listing.WorkspaceDir
+}
+
+// A credential's name is an environment-variable name. Anything else is not
+// kept.
+var credentialPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,79}$`)
+
+// parseCredentials reads, from the same "openclaw skills list --json" output,
+// the names of the credentials that usable skills declare and that OpenClaw
+// says are in place. OpenClaw makes that judgement: a name is in place when a
+// skill that is eligible and not disabled declares it and does not list it as
+// missing. This never looks at the environment or at any file of secrets, so
+// a variable no skill declares is never seen at all. A nil list means the
+// output could not be read.
+func parseCredentials(output []byte) []string {
+	start := bytes.IndexByte(output, '{')
+	if start < 0 {
+		return nil
+	}
+	var listing struct {
+		Skills []struct {
+			Eligible     bool   `json:"eligible"`
+			Disabled     bool   `json:"disabled"`
+			PrimaryEnv   string `json:"primaryEnv"`
+			Requirements struct {
+				Env []string `json:"env"`
+			} `json:"requirements"`
+			Missing struct {
+				Env []string `json:"env"`
+			} `json:"missing"`
+		} `json:"skills"`
+	}
+	if err := json.NewDecoder(bytes.NewReader(output[start:])).Decode(&listing); err != nil || listing.Skills == nil {
+		return nil
+	}
+
+	names := []string{}
+	seen := map[string]bool{}
+	for _, skill := range listing.Skills {
+		if !skill.Eligible || skill.Disabled {
+			continue
+		}
+		missing := map[string]bool{}
+		for _, name := range skill.Missing.Env {
+			missing[name] = true
+		}
+		for _, name := range append([]string{skill.PrimaryEnv}, skill.Requirements.Env...) {
+			name = strings.TrimSpace(name)
+			if name == "" || missing[name] || seen[name] || !credentialPattern.MatchString(name) {
+				continue
+			}
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	if len(names) > maxInventoryItems {
+		names = names[:maxInventoryItems]
+	}
+	return names
 }
 
 // readConfig returns the top level of OpenClaw's config, or nil when there is

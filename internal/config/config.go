@@ -46,6 +46,9 @@ type Config struct {
 	Inventory bool
 	// Usage: report daily counts of the runtime's activity. On unless switched off.
 	Usage bool
+	// InventoryAllNames: also send the names of declared credentials the
+	// catalogue does not recognise. Off unless switched on, on this machine.
+	InventoryAllNames bool
 }
 
 type fileConfig struct {
@@ -55,6 +58,8 @@ type fileConfig struct {
 	Channel      string `json:"channel,omitempty"`
 	Inventory    *bool  `json:"inventory,omitempty"`
 	Usage        *bool  `json:"usage,omitempty"`
+	// InventoryAllNames is off unless set to true here.
+	InventoryAllNames *bool `json:"inventory_all_names,omitempty"`
 }
 
 func Load() (*Config, error) {
@@ -84,6 +89,9 @@ func Load() (*Config, error) {
 		}
 		if fc.Inventory != nil {
 			cfg.Inventory = *fc.Inventory
+		}
+		if fc.InventoryAllNames != nil {
+			cfg.InventoryAllNames = *fc.InventoryAllNames
 		}
 		if fc.Usage != nil {
 			cfg.Usage = *fc.Usage
@@ -118,6 +126,11 @@ func Load() (*Config, error) {
 	if v := os.Getenv("BEACONCLAW_INVENTORY"); v != "" {
 		if on, err := strconv.ParseBool(v); err == nil {
 			cfg.Inventory = on
+		}
+	}
+	if v := os.Getenv("BEACONCLAW_INVENTORY_ALL_NAMES"); v != "" {
+		if on, err := strconv.ParseBool(v); err == nil {
+			cfg.InventoryAllNames = on
 		}
 	}
 	if v := os.Getenv("BEACONCLAW_USAGE"); v != "" {
