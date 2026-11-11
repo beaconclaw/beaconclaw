@@ -12,11 +12,11 @@ The agent is a lightweight daemon that:
 2. Collects system metrics (CPU, memory, disk)
 3. Sends heartbeats to the BeaconClaw manager over WSS
 4. Reconnects with exponential backoff if the connection drops
-5. Keeps up to 100 recent heartbeats in memory while disconnected and sends them on reconnect
+5. Keeps the heartbeats the manager has not yet confirmed, up to two hours' worth, and sends them on reconnect
 
 All connections are **outbound**. No inbound firewall rules needed.
 
-The buffer is not saved to disk. Heartbeats can be lost during a long outage or when the agent restarts.
+Unconfirmed heartbeats are kept on disk, so a restart does not lose them. In an outage longer than two hours the oldest are dropped first.
 
 ## What It Sends
 
@@ -36,7 +36,7 @@ The runtime's state is sent twice in each heartbeat: once in a form that fits an
 
 What it does not do, as of this version:
 
-- It does not read or send conversations, sessions, messages, prompts, logs, files, credentials or usage data.
+- It does not read or send conversations, sessions, messages, prompts, logs, files or credentials. Usage is sent as counts only, as listed above.
 - It reads `~/.openclaw/openclaw.json` only to find the gateway port and, for the inventory, the names of the entries under `channels`, `mcp.servers` and `models.providers`, with whether each is switched on. It reads nothing inside those entries: no tokens, keys, addresses or account names. If that file is missing it looks in the older `~/.clawdbot/` and `~/.moldbot/` folders.
 - For the inventory it runs `openclaw skills list --json` and keeps each usable skill's name and source. A skill's description and contents are not sent. A name that is not a short plain label (a path, an address, a sentence) is left out.
 - For usage it runs `openclaw gateway call sessions.usage` once for each of the two days and keeps the counts listed above. From each conversation it reads only its channel and its message counts. It does not read or send conversation names, contents, participants, tool names or file names. If the runtime has not finished counting a day, that day is left out rather than sent as zero.
