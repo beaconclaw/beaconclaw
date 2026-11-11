@@ -17,6 +17,7 @@ func TestSystem(t *testing.T) {
 		"GOOGLE_PLACES_API_KEY": "Google Maps",
 		"GOOGLE_CLIENT_ID":      "Google",
 		"OPENAI_API_KEY":        "OpenAI",
+		"BEACONCLAW_API_KEY":    "BeaconClaw",
 	}
 	for credential, want := range cases {
 		if got, ok := System(credential); !ok || got != want {
