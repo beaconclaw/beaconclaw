@@ -52,7 +52,7 @@ func Describe(name string) string {
 	case Diagnostics:
 		return "run the agent's own checks again and report the result; changes nothing"
 	case RestartGateway:
-		return "restart the runtime's gateway; conversations in progress are cut off"
+		return "restart the runtime's gateway; it is away for a few minutes"
 	default:
 		return ""
 	}

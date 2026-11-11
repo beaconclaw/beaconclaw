@@ -13,11 +13,14 @@ import (
 	"github.com/beaconclaw/beaconclaw/internal/ws"
 )
 
-// How long after a restart the gateway is given to answer again, and how
-// often it is asked.
+// How long after the runtime's restart command returns the gateway is given
+// to answer again, how often it is asked, and the longest any action may take
+// in all. A restart takes minutes: the old gateway finishes its work and
+// stops, and the new one starts.
 const (
-	restartSettle = 60 * time.Second
+	restartSettle = 3 * time.Minute
 	restartPoll   = 3 * time.Second
+	actionTimeout = 12 * time.Minute
 )
 
 // actionResult is the agent's answer to an action. Result holds names and
@@ -27,7 +30,10 @@ type actionResult struct {
 	ID      string `json:"id"`
 	OK      bool   `json:"ok"`
 	Refused bool   `json:"refused,omitempty"`
-	Result  any    `json:"result,omitempty"`
+	// Started is true on the first of two answers to an action that was
+	// accepted: the work has begun, and the result follows when it is done.
+	Started bool `json:"started,omitempty"`
+	Result  any  `json:"result,omitempty"`
 }
 
 // allowedActions is what this copy tells the manager is switched on here.
@@ -55,8 +61,10 @@ func (a *Agent) handleAction(m ws.Message) {
 	}
 
 	a.recordAction(command, "started")
+	// Say at once that it was accepted, so the manager knows to wait for the result.
+	a.answer(actionResult{ID: m.ID, Started: true})
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), restartSettle+2*time.Minute)
+		ctx, cancel := context.WithTimeout(context.Background(), actionTimeout)
 		defer cancel()
 		result := a.perform(ctx, command.Action)
 		outcome := "failed"

@@ -108,11 +108,24 @@ func (m *actingManager) result(id string) map[string]any {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, result := range m.results {
-		if result["id"] == id {
+		// The first answer to an accepted action only says it has begun.
+		if result["id"] == id && result["started"] != true {
 			return result
 		}
 	}
 	return nil
+}
+
+// started reports whether the agent said it had begun the action.
+func (m *actingManager) started(id string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, result := range m.results {
+		if result["id"] == id && result["started"] == true {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *actingManager) registered() map[string]any {
@@ -222,6 +235,9 @@ func TestRestartRunsOnlyWhenSwitchedOnAndReportsWhetherTheGatewayCameBack(t *tes
 	startActing(t, m2, runtime2, []string{actions.RestartGateway})
 	m2.send("r2", "agent-on-manager", actions.RestartGateway, time.Now().Add(time.Minute))
 	eventually(t, "the restart result", func() bool { return m2.result("r2") != nil })
+	if !m2.started("r2") {
+		t.Fatal("the agent did not say it had begun the restart before reporting the result")
+	}
 	if m2.result("r2")["ok"] != true || runtime2.count() != 1 {
 		t.Fatalf("restart: %v, restarts=%d", m2.result("r2"), runtime2.count())
 	}
@@ -229,6 +245,9 @@ func TestRestartRunsOnlyWhenSwitchedOnAndReportsWhetherTheGatewayCameBack(t *tes
 	m2.send("r2", "agent-on-manager", actions.RestartGateway, time.Now().Add(time.Minute))
 	m2.send("r3", "agent-on-manager", actions.RestartGateway, time.Now().Add(time.Minute))
 	eventually(t, "the second refusal", func() bool { return m2.result("r3") != nil })
+	if m2.started("r3") {
+		t.Fatal("a refused command was reported as begun")
+	}
 	if m2.result("r3")["refused"] != true || runtime2.count() != 1 {
 		t.Fatalf("a second restart was not refused: %v, restarts=%d", m2.result("r3"), runtime2.count())
 	}
