@@ -46,7 +46,7 @@ What it does not do, as of this version:
 - To learn the OpenClaw version it looks for the running gateway among the machine's processes, by command line, and reads the `name` and `version` fields of that copy's `package.json`. Command lines of other processes are not kept or sent. If that finds nothing, it follows the `openclaw` command to its package and reads the same two fields, and as a last resort runs `openclaw --version`.
 - When you run `beaconclaw maintenance start` or `end`, it sends one request to the manager with the agent's token: the reason you typed and the length in minutes, or nothing for `end`. This is the only thing it sends that you type yourself. The token can only put its own agent into maintenance.
 - **Out of the box it cannot receive or run anything from the manager.** Remote actions are an add-on you switch on yourself, one action at a time; see [Remote actions](#remote-actions). Even then the manager can only name an action from a short fixed list. It cannot send a command line, and it cannot switch an action on.
-- With a remote action switched on, and only when one is asked for, it sends back the result: for `diagnostics`, each check's name, whether it passed and a short state such as a version or "41% used"; for `restart_gateway`, whether the gateway answered again and how many seconds that took. A refused request sends back the reason. When it connects it also sends the names of the actions you have switched on.
+- With a remote action switched on, and only when one is asked for, it sends back the result: for `diagnostics`, each check's name, whether it passed and a short state such as a version or "41% used"; for `restart_gateway`, whether the gateway answered again and how many seconds that took after the restart command returned. A refused request sends back the reason. When it connects it also sends the names of the actions you have switched on.
 - It opens no listening ports.
 
 Heartbeats the manager has not yet acknowledged are kept in `outbox.json` in the agent's config folder, readable only by your user, so an outage or a restart does not lose them. By default up to two hours' worth are kept; the oldest are dropped first. They are removed as soon as the manager confirms them.
@@ -220,7 +220,7 @@ An add-on, **off unless you switch it on on this machine**. With an action switc
 | Action | What it does here |
 | :-- | :-- |
 | `diagnostics` | Runs the agent's own checks again (gateway answering and ready, versions, memory, disk) and sends back each check's name and state. Changes nothing. |
-| `restart_gateway` | Runs `openclaw gateway restart`, the command you would run by hand, then reports whether the gateway answered again within a minute. Conversations in progress are cut off. |
+| `restart_gateway` | Runs `openclaw gateway restart`, the command you would run by hand, then reports whether the gateway answered again. Conversations in progress are cut off, and the gateway is away for a few minutes while it stops and starts. |
 
 ```sh
 beaconclaw actions                              # what is on and off
