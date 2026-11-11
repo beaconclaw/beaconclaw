@@ -28,7 +28,7 @@ Outbound-only means nothing connects in to your machine. It does not mean no dat
 | Host | Hostname, operating system, architecture |
 | System metrics | CPU percent; memory total, used and percent; root disk total, used and percent |
 | Runtime (OpenClaw gateway) | Which runtime it is; whether it is present, healthy and ready; names of failing channels; uptime; gateway port; runtime version |
-| Inventory (every 15 minutes) | Names of the skills the runtime has loaded and where each comes from (for example, shipped with the runtime or added on this machine); names of the chat channels, tool servers and model providers it is set up to use; the commit of the runtime's workspace folder and whether that folder has uncommitted changes |
+| Inventory (every 15 minutes) | Names of the skills the runtime has loaded and where each comes from (for example, shipped with the runtime or added on this machine); names of the chat channels, tool servers and model providers it is set up to use; the names of the systems it holds a credential for (for example "Jira"), and how many declared credentials were not recognised; the commit of the runtime's workspace folder and whether that folder has uncommitted changes |
 | Usage (every hour) | For today and yesterday, as numbers only: how many conversations had activity, how many user messages, assistant messages and tool calls, the tokens used and what the runtime says they cost, in total and split by where the conversations came from (for example a chat service or a schedule) |
 | Agent | BeaconClaw agent version, protocol version, and what the runtime adapter can report (sent once per connection) |
 
@@ -39,6 +39,8 @@ What it does not do, as of this version:
 - It does not read or send conversations, sessions, messages, prompts, logs, files or credentials. Usage is sent as counts only, as listed above.
 - It reads `~/.openclaw/openclaw.json` only to find the gateway port and, for the inventory, the names of the entries under `channels`, `mcp.servers` and `models.providers`, with whether each is switched on. It reads nothing inside those entries: no tokens, keys, addresses or account names. If that file is missing it looks in the older `~/.clawdbot/` and `~/.moldbot/` folders.
 - For the inventory it runs `openclaw skills list --json` and keeps each usable skill's name and source. A skill's description and contents are not sent. A name that is not a short plain label (a path, an address, a sentence) is left out.
+- **BeaconClaw never opens your environment file.** To learn which systems the runtime can reach, it asks OpenClaw which skills are ready and which credentials they declare (the same `openclaw skills list --json` output). A credential counts when a usable skill declares it and OpenClaw does not report it missing. BeaconClaw sees the credential's name, never its value, and a variable that no skill declares is never seen at all.
+- A credential's name is turned into a system's name by a list that ships with the agent ([`internal/catalogue/systems.txt`](internal/catalogue/systems.txt)): `JIRA_API_TOKEN` is sent as "Jira". A name the list does not recognise is not sent; only the number of such names is. `beaconclaw inventory` shows on the machine which systems are sent and which names stayed behind. To add a system to the list, add a line and open a pull request.
 - For usage it runs `openclaw gateway call sessions.usage` once for each of the two days and keeps the counts listed above. From each conversation it reads only its channel and its message counts. It does not read or send conversation names, contents, participants, tool names or file names. If the runtime has not finished counting a day, that day is left out rather than sent as zero.
 - If the workspace folder is a git checkout it runs `git rev-parse HEAD` and `git status --porcelain` there, and sends the commit and a yes or no for uncommitted changes. It does not send the repository's address, branch names, file names or contents.
 - To learn the OpenClaw version it looks for the running gateway among the machine's processes, by command line, and reads the `name` and `version` fields of that copy's `package.json`. Command lines of other processes are not kept or sent. If that finds nothing, it follows the `openclaw` command to its package and reads the same two fields, and as a last resort runs `openclaw --version`.
@@ -134,6 +136,9 @@ beaconclaw maintenance end
 # Check status
 beaconclaw status
 
+# Show which connected systems are reported, and what stays on this machine
+beaconclaw inventory
+
 # Remove the system service
 beaconclaw uninstall
 
@@ -184,6 +189,7 @@ Every command acts on one profile and leaves the others alone. Choose the profil
 | `BEACONCLAW_OPENCLAW_PORT` | Override OpenClaw gateway port | auto-detected |
 | `BEACONCLAW_PROFILE` | Profile to act on | default profile |
 | `BEACONCLAW_INVENTORY` | `false` to stop reporting skill and connection names | `true` |
+| `BEACONCLAW_INVENTORY_ALL_NAMES` | `true` to also send the names of declared credentials the list does not recognise | `false` |
 | `BEACONCLAW_USAGE` | `false` to stop reporting daily usage counts | `true` |
 
 `beaconclaw update` also reads `GITHUB_TOKEN` if it is set, and sends it to GitHub only to raise the download rate limit. `BEACONCLAW_RELEASES_API` and `BEACONCLAW_RELEASES_DOWNLOAD` point the updater at another release host for testing; it must be an `https` address unless it is on this machine.
@@ -197,6 +203,10 @@ The agent auto-detects the OpenClaw gateway port from `~/.openclaw/openclaw.json
 ### Switching the inventory off
 
 The inventory is on by default. To send health only, set `"inventory": false` in the config file or `BEACONCLAW_INVENTORY=false` in the service's environment, then restart the agent. Nothing is then collected or sent for it, and the agent tells the manager it does not report an inventory.
+
+### Sending unrecognised credential names
+
+Off by default. To also send the names of declared credentials the list does not recognise, set `"inventory_all_names": true` in the config file or `BEACONCLAW_INVENTORY_ALL_NAMES=true` in the service's environment, then restart the agent. Names only, as before, and only those a skill declares. They are shown to the organization that operates the agent.
 
 ### Switching usage off
 

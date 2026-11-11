@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/beaconclaw/beaconclaw/internal/adapter"
+	"github.com/beaconclaw/beaconclaw/internal/catalogue"
 	"github.com/beaconclaw/beaconclaw/internal/config"
 	"github.com/beaconclaw/beaconclaw/internal/heartbeat"
 	"github.com/beaconclaw/beaconclaw/internal/openclaw"
@@ -198,6 +199,20 @@ func (a *Agent) watchInventory(ctx context.Context) <-chan heartbeat.Inventory {
 				Skills:      found.Skills,
 				Connections: found.Connections,
 				Revision:    found.Revision,
+			}
+			// Credential names become system names here. A name the catalogue
+			// does not know is counted and stays on the machine, unless the
+			// machine's owner has asked for all names to be sent.
+			if found.Credentials != nil {
+				systems, unrecognised := catalogue.Sort(found.Credentials)
+				if systems == nil {
+					systems = []string{}
+				}
+				inventory.Systems = systems
+				inventory.UnrecognisedCredentials = len(unrecognised)
+				if a.cfg.InventoryAllNames {
+					inventory.CredentialNames = found.Credentials
+				}
 			}
 			select {
 			case out <- inventory:

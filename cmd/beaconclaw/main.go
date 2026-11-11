@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/beaconclaw/beaconclaw/internal/agent"
+	"github.com/beaconclaw/beaconclaw/internal/catalogue"
 	"github.com/beaconclaw/beaconclaw/internal/config"
 	"github.com/beaconclaw/beaconclaw/internal/daemon"
 	"github.com/beaconclaw/beaconclaw/internal/maintenance"
@@ -61,6 +62,7 @@ func main() {
 	root.AddCommand(stopCmd())
 	root.AddCommand(restartCmd())
 	root.AddCommand(statusCmd())
+	root.AddCommand(inventoryCmd())
 	root.AddCommand(maintenanceCmd())
 	root.AddCommand(updateCmd())
 	root.AddCommand(channelCmd())
@@ -355,6 +357,56 @@ func waitingHeartbeats(count int) string {
 		return "1 heartbeat not yet confirmed by the manager"
 	default:
 		return fmt.Sprintf("%d heartbeats not yet confirmed by the manager", count)
+	}
+}
+
+// inventoryCmd shows, on the machine, what the inventory finds about connected
+// systems, including what is deliberately not sent.
+func inventoryCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "inventory",
+		Short: "Show which connected systems are reported, and what stays on this machine",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load()
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
+			if !cfg.Inventory {
+				fmt.Println("The inventory is switched off on this machine. Nothing is collected or sent for it.")
+				return nil
+			}
+
+			found := openclaw.NewAdapter(cfg.OpenClawPort).Inventory(cmd.Context())
+			if found.Credentials == nil {
+				fmt.Println("OpenClaw could not be asked which credentials its skills declare.")
+				return nil
+			}
+			systems, unrecognised := catalogue.Sort(found.Credentials)
+
+			fmt.Println("BeaconClaw asks OpenClaw which credentials its usable skills declare and have.")
+			fmt.Println("It never opens your environment file, and it never sees a value.")
+			fmt.Println()
+			fmt.Printf("Sent as connected systems (%d):\n", len(systems))
+			for _, system := range systems {
+				fmt.Printf("  %s\n", system)
+			}
+			if len(systems) == 0 {
+				fmt.Println("  none")
+			}
+			fmt.Println()
+			if cfg.InventoryAllNames {
+				fmt.Printf("Not recognised (%d). Their names ARE sent, because inventory_all_names is on:\n", len(unrecognised))
+			} else {
+				fmt.Printf("Not recognised (%d). Only this number is sent; the names stay here:\n", len(unrecognised))
+			}
+			for _, name := range unrecognised {
+				fmt.Printf("  %s\n", name)
+			}
+			if len(unrecognised) == 0 {
+				fmt.Println("  none")
+			}
+			return nil
+		},
 	}
 }
 

@@ -75,6 +75,12 @@ type Inventory struct {
 	// Revision is the commit of the runtime's working folder, when that folder
 	// is a git checkout. Nil otherwise.
 	Revision *Revision
+	// Credentials are the names of the credentials the runtime's own skills
+	// declare and the runtime says are in place. Names only, as the runtime
+	// reports them: an adapter never opens an environment file or a secrets
+	// store to find them. They stay on the machine; what is sent is worked
+	// out from them by the agent.
+	Credentials []string
 }
 
 // Skill names one thing a runtime can do.

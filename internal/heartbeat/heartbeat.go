@@ -60,6 +60,16 @@ type Inventory struct {
 	// Revision is the commit of the runtime's working folder, or null when
 	// that folder is not a git checkout.
 	Revision *adapter.Revision `json:"revision"`
+	// Systems are the systems the runtime holds a credential for, by the name
+	// people call them ("Jira"), worked out from the names of credentials its
+	// skills declare. A credential's own name is not sent here.
+	Systems []string `json:"systems"`
+	// UnrecognisedCredentials counts the declared credentials the agent's
+	// catalogue could not put a system to. Only the number is sent.
+	UnrecognisedCredentials int `json:"unrecognised_credentials"`
+	// CredentialNames are the names of every declared credential in place. It
+	// is sent only when the machine's owner has switched that on.
+	CredentialNames []string `json:"credential_names,omitempty"`
 }
 
 // Usage is the runtime's activity on recent days, as counts only.

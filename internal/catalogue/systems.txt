@@ -1,0 +1,110 @@
+# The systems BeaconClaw recognises from the names of credentials.
+#
+# One system per line: the name people call it, a tab or " = ", then the
+# prefixes a credential name can begin with, separated by spaces. Names are
+# compared in upper case. A prefix ending in "_" matches a whole word: "GH_"
+# matches GH_TOKEN and not GHOST_API_KEY. The first line that matches wins, so
+# put a longer prefix above a shorter one that would also match.
+#
+# To add a system, add a line and send a pull request. Nothing here is a
+# secret: these are names a runtime's skills declare in public.
+
+Airtable = AIRTABLE_
+Algolia = ALGOLIA_
+Amazon Web Services = AWS_
+Anthropic = ANTHROPIC_ CLAUDE_
+Asana = ASANA_
+Atlassian = ATLASSIAN_
+Auth0 = AUTH0_
+Azure = AZURE_
+Bitbucket = BITBUCKET_
+Box = BOX_
+Brave Search = BRAVE_
+Calendly = CALENDLY_
+Canva = CANVA_
+CircleCI = CIRCLECI_ CIRCLE_
+ClickUp = CLICKUP_
+Cloudflare = CLOUDFLARE_ CF_
+Cohere = COHERE_
+Confluence = CONFLUENCE_
+Contentful = CONTENTFUL_
+Datadog = DATADOG_ DD_
+Deepgram = DEEPGRAM_
+DigitalOcean = DIGITALOCEAN_ DO_
+Discord = DISCORD_
+Docker Hub = DOCKERHUB_ DOCKER_
+Dropbox = DROPBOX_
+ElevenLabs = ELEVENLABS_ ELEVEN_
+Exa = EXA_
+Fal = FAL_
+Figma = FIGMA_
+Firecrawl = FIRECRAWL_
+Freshdesk = FRESHDESK_
+GitHub = GITHUB_ GH_
+GitLab = GITLAB_
+Google Maps = GOOGLE_PLACES_ GOOGLE_MAPS_
+Google Gemini = GEMINI_ GOOGLE_AI_ GOOGLE_GENERATIVE_
+Google Cloud = GOOGLE_CLOUD_ GCP_ GCLOUD_
+Google = GOOGLE_
+Grafana = GRAFANA_
+Groq = GROQ_
+Heroku = HEROKU_
+Home Assistant = HOMEASSISTANT_ HASS_
+HubSpot = HUBSPOT_
+Hugging Face = HUGGINGFACE_ HF_
+Intercom = INTERCOM_
+Jenkins = JENKINS_
+Jira = JIRA_
+LaunchDarkly = LAUNCHDARKLY_ LD_
+Linear = LINEAR_
+LinkedIn = LINKEDIN_
+Mailchimp = MAILCHIMP_
+Mailgun = MAILGUN_
+Mattermost = MATTERMOST_
+Microsoft Teams = MSTEAMS_ TEAMS_
+Microsoft = MICROSOFT_ MS_GRAPH_
+Mistral = MISTRAL_
+Monday.com = MONDAY_
+MongoDB = MONGODB_ MONGO_
+Netlify = NETLIFY_
+New Relic = NEWRELIC_ NEW_RELIC_
+Notion = NOTION_
+Okta = OKTA_
+OpenAI = OPENAI_
+OpenRouter = OPENROUTER_
+PagerDuty = PAGERDUTY_
+Perplexity = PERPLEXITY_ PPLX_
+Pinecone = PINECONE_
+Postmark = POSTMARK_
+QuickBooks = QUICKBOOKS_
+Reddit = REDDIT_
+Replicate = REPLICATE_
+Resend = RESEND_
+Salesforce = SALESFORCE_ SFDC_
+SendGrid = SENDGRID_
+Sentry = SENTRY_
+SerpApi = SERPAPI_
+ServiceNow = SERVICENOW_
+Shopify = SHOPIFY_
+Slack = SLACK_
+Snowflake = SNOWFLAKE_
+Spotify = SPOTIFY_
+Stripe = STRIPE_
+Supabase = SUPABASE_
+Supadata = SUPADATA_
+Tavily = TAVILY_
+Telegram = TELEGRAM_
+Todoist = TODOIST_
+Trello = TRELLO_
+Twilio = TWILIO_
+Venice = VENICE_
+Vercel = VERCEL_
+WhatsApp = WHATSAPP_
+Workday = WORKDAY_
+X = TWITTER_ X_API_ X_BEARER_
+xAI = XAI_ GROK_
+Xero = XERO_
+YouTube = YOUTUBE_
+Zapier = ZAPIER_
+Zendesk = ZENDESK_
+Zoom = ZOOM_
