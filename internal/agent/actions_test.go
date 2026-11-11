@@ -5,9 +5,12 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -30,13 +33,15 @@ type restartable struct {
 	fakeRuntime
 	mu       sync.Mutex
 	restarts int
+	// commandErr is what the runtime's restart command returns.
+	commandErr error
 }
 
 func (r *restartable) RestartGateway(context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.restarts++
-	return nil
+	return r.commandErr
 }
 
 func (r *restartable) count() int {
@@ -270,5 +275,30 @@ func TestCommandsForAnotherAgentExpiredOrUnknownAreRefused(t *testing.T) {
 	}
 	if runtime.count() != 0 {
 		t.Fatalf("the gateway was restarted %d times by commands that should all have been refused", runtime.count())
+	}
+}
+
+func TestARestartIsJudgedByWhetherTheGatewayAnswersNotByTheCommandsExitCode(t *testing.T) {
+	// The runtime's command reports an error, but the gateway is answering afterwards.
+	m := newActingManager(t)
+	runtime := &restartable{commandErr: errors.New("exit status 1")}
+	startActing(t, m, runtime, []string{actions.RestartGateway})
+	m.send("r1", "agent-on-manager", actions.RestartGateway, time.Now().Add(time.Minute))
+	eventually(t, "the restart result", func() bool { return m.result("r1") != nil })
+
+	result := m.result("r1")
+	detail, _ := result["result"].(map[string]any)
+	if result["ok"] != true || detail["gateway_answering"] != true || detail["restart_command_ok"] != false {
+		t.Fatalf("got %v, want a success that notes the command's error", result)
+	}
+
+	// With no copy of the runtime's command on the machine, nothing was run and it fails at once.
+	m2 := newActingManager(t)
+	missing := &restartable{commandErr: fmt.Errorf("not found: %w", exec.ErrNotFound)}
+	startActing(t, m2, missing, []string{actions.RestartGateway})
+	m2.send("r2", "agent-on-manager", actions.RestartGateway, time.Now().Add(time.Minute))
+	eventually(t, "the failure", func() bool { return m2.result("r2") != nil })
+	if m2.result("r2")["ok"] == true {
+		t.Fatalf("a restart that never ran was reported as done: %v", m2.result("r2"))
 	}
 }

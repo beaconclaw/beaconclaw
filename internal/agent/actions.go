@@ -2,9 +2,11 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"time"
 
 	"github.com/beaconclaw/beaconclaw/internal/actions"
@@ -101,13 +103,19 @@ func (a *Agent) perform(ctx context.Context, action string) actionResult {
 		if !can {
 			return actionResult{Result: map[string]string{"reason": "this runtime cannot be restarted by the agent"}}
 		}
-		if err := restarter.RestartGateway(ctx); err != nil {
-			return actionResult{Result: map[string]string{"reason": "the runtime's restart command failed"}}
+		err := restarter.RestartGateway(ctx)
+		if errors.Is(err, exec.ErrNotFound) {
+			// Nothing was run, so there is nothing to wait for.
+			return actionResult{Result: map[string]string{"reason": "the runtime's command was not found on this machine"}}
 		}
+		// The runtime's command can report an error although the gateway did
+		// restart, for instance when its own wait runs out first. What counts
+		// is whether the gateway answers again.
 		back, waited := a.waitForGateway(ctx)
 		return actionResult{OK: back, Result: map[string]any{
-			"gateway_answering": back,
-			"waited_seconds":    int(waited.Seconds()),
+			"gateway_answering":  back,
+			"restart_command_ok": err == nil,
+			"waited_seconds":     int(waited.Seconds()),
 		}}
 
 	default:
