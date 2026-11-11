@@ -17,6 +17,7 @@ Asana = ASANA_
 Atlassian = ATLASSIAN_
 Auth0 = AUTH0_
 Azure = AZURE_
+BeaconClaw = BEACONCLAW_API_
 Bitbucket = BITBUCKET_
 Box = BOX_
 Brave Search = BRAVE_
