@@ -35,7 +35,10 @@ type cronJob struct {
 	Name        string `json:"name"`
 	DisplayName string `json:"displayName"`
 	Enabled     *bool  `json:"enabled"`
-	Schedule    struct {
+	// DeclarationKey marks a job OpenClaw itself declared, such as the one
+	// for scheduled backups.
+	DeclarationKey string `json:"declarationKey"`
+	Schedule       struct {
 		Kind    string  `json:"kind"`
 		Expr    string  `json:"expr"`
 		TZ      string  `json:"tz"`

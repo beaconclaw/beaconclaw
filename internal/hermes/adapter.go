@@ -32,6 +32,7 @@ var _ adapter.Inventorier = (*Adapter)(nil)
 var _ adapter.UsageCounter = (*Adapter)(nil)
 var _ adapter.Automationer = (*Adapter)(nil)
 var _ adapter.Restarter = (*Adapter)(nil)
+var _ adapter.Signaler = (*Adapter)(nil)
 
 // NewAdapter reports on the Hermes home directory given, or, when it is empty,
 // on $HERMES_HOME, falling back to ~/.hermes as Hermes itself does.
@@ -75,6 +76,7 @@ func (a *Adapter) Capabilities() []adapter.Capability {
 		adapter.CapInventory,
 		adapter.CapUsage,
 		adapter.CapAutomations,
+		adapter.CapSignals,
 	}
 }
 

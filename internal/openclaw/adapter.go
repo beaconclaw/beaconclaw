@@ -22,6 +22,7 @@ var _ adapter.Adapter = (*Adapter)(nil)
 var _ adapter.Inventorier = (*Adapter)(nil)
 var _ adapter.UsageCounter = (*Adapter)(nil)
 var _ adapter.Automationer = (*Adapter)(nil)
+var _ adapter.Signaler = (*Adapter)(nil)
 
 // NewAdapter returns an adapter for the gateway on the given local port.
 func NewAdapter(port int) *Adapter {
@@ -40,6 +41,7 @@ func (a *Adapter) Capabilities() []adapter.Capability {
 		adapter.CapInventory,
 		adapter.CapUsage,
 		adapter.CapAutomations,
+		adapter.CapSignals,
 	}
 }
 

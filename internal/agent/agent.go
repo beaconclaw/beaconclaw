@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/beaconclaw/beaconclaw/internal/actions"
@@ -39,6 +40,12 @@ const (
 	defaultAutomationsEvery   = 5 * time.Minute
 	defaultAutomationsDelay   = 30 * time.Second
 	defaultAutomationsTimeout = 2 * time.Minute
+	// How often the runtime's signals are collected, how soon after
+	// starting, and how long one collection may take in all. Each command it
+	// runs has its own, shorter limit in the adapter.
+	defaultSignalsEvery   = time.Hour
+	defaultSignalsDelay   = 2 * time.Minute
+	defaultSignalsTimeout = 15 * time.Minute
 )
 
 // Agent is the main daemon orchestrator.
@@ -68,6 +75,10 @@ type Agent struct {
 	// Empty keeps no file.
 	automationsCursor string
 
+	signalsEvery   time.Duration
+	signalsDelay   time.Duration
+	signalsTimeout time.Duration
+
 	// The fields below belong to the Run loop alone.
 	connecting bool
 	// sent holds when each unacknowledged heartbeat was last sent on the
@@ -87,6 +98,13 @@ type Agent struct {
 	// job definitions are sent again only when it changes. Empty after a
 	// start, a new connection or a heartbeat given up on, so they are sent.
 	automationsHash string
+	// signals are the newest signals collected. They are kept after being
+	// sent, so they can be sent again after a reconnection.
+	signals *heartbeat.Signals
+	// signalsHash is the content hash of the signals last put in a
+	// heartbeat. Signals go out only when their hash differs from it. Empty
+	// after a start, a new connection or a heartbeat given up on.
+	signalsHash string
 	// managerAgentID is the manager's own ID for this agent, as it said when
 	// the agent registered. A command for any other agent is refused.
 	managerAgentID string
@@ -122,6 +140,9 @@ func New(cfg *config.Config) *Agent {
 		automationsDelay:   defaultAutomationsDelay,
 		automationsTimeout: defaultAutomationsTimeout,
 		automationsCursor:  config.AutomationsCursorPath(),
+		signalsEvery:       defaultSignalsEvery,
+		signalsDelay:       defaultSignalsDelay,
+		signalsTimeout:     defaultSignalsTimeout,
 		sent:               map[uint64]time.Time{},
 		attempts:           map[uint64]int{},
 	}
@@ -149,6 +170,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	inventories := a.watchInventory(ctx)
 	usages := a.watchUsage(ctx)
 	automationReports := a.watchAutomations(ctx)
+	signalReports := a.watchSignals(ctx)
 
 	for {
 		select {
@@ -176,6 +198,10 @@ func (a *Agent) Run(ctx context.Context) error {
 			}
 			a.automations = &automations
 			log.Printf("automations listed (%d jobs, %d new runs)", len(automations.States), len(automations.Runs))
+
+		case signals := <-signalReports:
+			a.signals = &signals
+			log.Printf("signals collected (%s)", signalParts(signals))
 
 		case <-connected:
 			a.connecting = false
@@ -213,6 +239,13 @@ func (a *Agent) collect(ctx context.Context) {
 		a.automationsHash = a.automations.DefinitionsHash
 		payload.Automations = a.automations
 		a.automations = nil
+	}
+	// Signals go out only when they changed since they were last sent.
+	if a.signals != nil {
+		if hash := a.signals.Hash(); hash != a.signalsHash {
+			a.signalsHash = hash
+			payload.Signals = a.signals
+		}
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
@@ -323,7 +356,7 @@ func (a *Agent) watchUsage(ctx context.Context) <-chan heartbeat.Usage {
 // runtime that cannot list them, so nothing is ever sent for it.
 func (a *Agent) watchAutomations(ctx context.Context) <-chan heartbeat.Automations {
 	source, ok := a.runtime.(adapter.Automationer)
-	if !ok || !adapter.Supports(a.runtime, adapter.CapAutomations) {
+	if !ok || !a.cfg.Automations || !adapter.Supports(a.runtime, adapter.CapAutomations) {
 		return nil
 	}
 	every := a.automationsEvery
@@ -367,6 +400,71 @@ func (a *Agent) watchAutomations(ctx context.Context) <-chan heartbeat.Automatio
 		}
 	}()
 	return out
+}
+
+// watchSignals collects the runtime's signals a few minutes after starting
+// and then hourly, on the side like the inventory. Each part is read on its
+// own; a collection that finds nothing, or runs out of time, sends nothing.
+// The channel is nil for a runtime that cannot report signals, or when they
+// are switched off, so nothing is ever collected or sent.
+func (a *Agent) watchSignals(ctx context.Context) <-chan heartbeat.Signals {
+	source, ok := a.runtime.(adapter.Signaler)
+	if !ok || !a.cfg.Signals || !adapter.Supports(a.runtime, adapter.CapSignals) {
+		return nil
+	}
+	every := a.signalsEvery
+	if every <= 0 {
+		every = defaultSignalsEvery
+	}
+	timeout := a.signalsTimeout
+	if timeout <= 0 {
+		timeout = defaultSignalsTimeout
+	}
+
+	out := make(chan heartbeat.Signals)
+	go func() {
+		wait := a.signalsDelay
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(wait):
+			}
+			wait = every
+
+			collectCtx, cancel := context.WithTimeout(ctx, timeout)
+			report, ok := source.Signals(collectCtx)
+			late := collectCtx.Err() != nil
+			cancel()
+			if !ok || late || report.Empty() {
+				continue
+			}
+			select {
+			case out <- heartbeat.NewSignals(report, time.Now()):
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return out
+}
+
+// signalParts names, for the log, the parts a collection found.
+func signalParts(s heartbeat.Signals) string {
+	parts := []string{}
+	add := func(present bool, name string) {
+		if present {
+			parts = append(parts, name)
+		}
+	}
+	add(s.Credentials != nil, "credentials")
+	add(s.Approvals != nil, "approvals")
+	add(s.Pairing != nil, "pairing")
+	add(s.Backups != nil, "backups")
+	add(s.Update != nil, "update")
+	add(s.Security != nil, "security")
+	add(s.Doctor != nil, "doctor")
+	return strings.Join(parts, ", ")
 }
 
 // automationsCursorFile is what is kept on disk: the adapter's own record of
@@ -423,8 +521,9 @@ func (a *Agent) flush(ctx context.Context, connected chan struct{}) {
 			log.Printf("giving up on heartbeat seq=%d: sent %d times with no acknowledgement", entry.Seq, maxSendAttempts)
 			a.outbox.Drop(entry.Seq)
 			delete(a.attempts, entry.Seq)
-			// It may have carried the job definitions.
+			// It may have carried the job definitions or the signals.
 			a.automationsHash = ""
+			a.signalsHash = ""
 			continue
 		}
 		if err := a.client.SendHeartbeat(heartbeat.ProtocolVersion, entry.Data); err != nil {
@@ -454,8 +553,9 @@ func (a *Agent) handle(m ws.Message) {
 			a.managerProtocol = 1
 		}
 		a.managerAgentID = m.AgentID
-		// A new connection gets the job definitions again.
+		// A new connection gets the job definitions and signals again.
 		a.automationsHash = ""
+		a.signalsHash = ""
 		log.Printf("registered with manager (manager protocol %d, agent protocol %d)", a.managerProtocol, heartbeat.ProtocolVersion)
 	case "action":
 		a.handleAction(m)
@@ -539,6 +639,12 @@ func (a *Agent) registration() ws.Registration {
 			continue
 		}
 		if c == adapter.CapUsage && !a.cfg.Usage {
+			continue
+		}
+		if c == adapter.CapAutomations && !a.cfg.Automations {
+			continue
+		}
+		if c == adapter.CapSignals && !a.cfg.Signals {
 			continue
 		}
 		capabilities = append(capabilities, string(c))

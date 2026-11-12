@@ -50,6 +50,13 @@ type Config struct {
 	// InventoryAllNames: also send the names of declared credentials the
 	// catalogue does not recognise. Off unless switched on, on this machine.
 	InventoryAllNames bool
+	// Automations: report the runtime's scheduled jobs and their runs. On
+	// unless switched off.
+	Automations bool
+	// Signals: report credential health, pending approvals and pairing
+	// requests, backups, updates and the runtime's own audits. On unless
+	// switched off.
+	Signals bool
 	// Actions are the remote actions switched on on this machine. Empty
 	// unless someone here switched one on; the manager cannot.
 	Actions []string
@@ -86,6 +93,8 @@ type fileConfig struct {
 	Usage        *bool  `json:"usage,omitempty"`
 	// InventoryAllNames is off unless set to true here.
 	InventoryAllNames *bool `json:"inventory_all_names,omitempty"`
+	Automations       *bool `json:"automations,omitempty"`
+	Signals           *bool `json:"signals,omitempty"`
 	// Actions are the remote actions switched on here. There is no
 	// environment variable for this: it is set only by the actions command.
 	Actions []string `json:"actions,omitempty"`
@@ -105,6 +114,8 @@ func Load() (*Config, error) {
 		Channel:           ChannelStable,
 		Inventory:         true,
 		Usage:             true,
+		Automations:       true,
+		Signals:           true,
 	}
 
 	// Load from config file (lowest priority)
@@ -129,6 +140,12 @@ func Load() (*Config, error) {
 		}
 		if fc.Usage != nil {
 			cfg.Usage = *fc.Usage
+		}
+		if fc.Automations != nil {
+			cfg.Automations = *fc.Automations
+		}
+		if fc.Signals != nil {
+			cfg.Signals = *fc.Signals
 		}
 		cfg.Actions = actions.Normalize(fc.Actions)
 		cfg.Runtime = fc.Runtime
@@ -181,6 +198,16 @@ func Load() (*Config, error) {
 	if v := os.Getenv("BEACONCLAW_USAGE"); v != "" {
 		if on, err := strconv.ParseBool(v); err == nil {
 			cfg.Usage = on
+		}
+	}
+	if v := os.Getenv("BEACONCLAW_AUTOMATIONS"); v != "" {
+		if on, err := strconv.ParseBool(v); err == nil {
+			cfg.Automations = on
+		}
+	}
+	if v := os.Getenv("BEACONCLAW_SIGNALS"); v != "" {
+		if on, err := strconv.ParseBool(v); err == nil {
+			cfg.Signals = on
 		}
 	}
 	if v := os.Getenv("BEACONCLAW_AUTOMATION_NAMES"); v != "" {
