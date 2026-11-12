@@ -1,7 +1,8 @@
 // Package hermes reports on a Hermes Agent runtime (Nous Research) on this
 // machine. It reads only what Hermes itself writes for monitoring: the gateway's
 // state file, the names of skills on disk, the names of configured platforms,
-// tool servers and model providers, and counts from its session store. It never
+// tool servers and model providers, counts from its session store, and the
+// names, schedules and outcomes of its scheduled jobs. It never
 // opens Hermes's environment file, and it never reads a credential or the text
 // of a conversation.
 package hermes
@@ -29,6 +30,7 @@ type Adapter struct {
 var _ adapter.Adapter = (*Adapter)(nil)
 var _ adapter.Inventorier = (*Adapter)(nil)
 var _ adapter.UsageCounter = (*Adapter)(nil)
+var _ adapter.Automationer = (*Adapter)(nil)
 var _ adapter.Restarter = (*Adapter)(nil)
 
 // NewAdapter reports on the Hermes home directory given, or, when it is empty,
@@ -72,6 +74,7 @@ func (a *Adapter) Capabilities() []adapter.Capability {
 		adapter.CapVersion,
 		adapter.CapInventory,
 		adapter.CapUsage,
+		adapter.CapAutomations,
 	}
 }
 

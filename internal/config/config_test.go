@@ -120,3 +120,35 @@ func TestSaveEndpointAndChannelKeepOtherSettings(t *testing.T) {
 		t.Errorf("config = %+v", cfg)
 	}
 }
+
+func TestAutomationNames(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("BEACONCLAW_TOKEN", "")
+	t.Setenv("BEACONCLAW_ENDPOINT", "")
+
+	t.Setenv("BEACONCLAW_AUTOMATION_NAMES", "")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AutomationNames != AutomationNamesShown || cfg.HideAutomationNames() {
+		t.Errorf("default = %q, want shown", cfg.AutomationNames)
+	}
+
+	t.Setenv("BEACONCLAW_AUTOMATION_NAMES", " Hidden ")
+	if cfg, err = Load(); err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.HideAutomationNames() {
+		t.Errorf("BEACONCLAW_AUTOMATION_NAMES=Hidden gave %q", cfg.AutomationNames)
+	}
+
+	valid := Config{Token: "bc_test123", Endpoint: "wss://api.beaconclaw.ai/ws", OpenClawPort: 18789}
+	for value, wantErr := range map[string]bool{"": false, "shown": false, "hidden": false, "hide": true, "off": true} {
+		cfg := valid
+		cfg.AutomationNames = value
+		if err := Validate(&cfg); (err != nil) != wantErr {
+			t.Errorf("Validate(automation_names=%q) error = %v, want error %v", value, err, wantErr)
+		}
+	}
+}
