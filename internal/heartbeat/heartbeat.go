@@ -46,6 +46,10 @@ type Payload struct {
 	// Usage is how much the runtime was used on recent days, as counts. Like
 	// the inventory, it is gathered rarely and sent with the next heartbeat.
 	Usage *Usage `json:"usage,omitempty"`
+	// Automations are the runtime's scheduled jobs and their recent runs.
+	// Like the inventory, they are gathered on the side and sent with the next
+	// heartbeat. Left out entirely for a runtime that cannot list them.
+	Automations *Automations `json:"automations,omitempty"`
 	// Report is the neutral reading of the same probe. It is for the agent's
 	// own use and is not sent.
 	Report adapter.Report `json:"-"`

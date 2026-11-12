@@ -59,6 +59,22 @@ type Config struct {
 	// HermesHome is Hermes's home directory. Empty means $HERMES_HOME, then
 	// ~/.hermes, as Hermes itself decides.
 	HermesHome string
+	// AutomationNames is AutomationNamesShown (the default) or
+	// AutomationNamesHidden, which sends "Automation 1", "Automation 2" and so
+	// on in place of each scheduled job's name.
+	AutomationNames string
+}
+
+// Values of the automation_names setting.
+const (
+	AutomationNamesShown  = "shown"
+	AutomationNamesHidden = "hidden"
+)
+
+// HideAutomationNames reports whether scheduled jobs' names are replaced
+// before they are sent.
+func (c *Config) HideAutomationNames() bool {
+	return c.AutomationNames == AutomationNamesHidden
 }
 
 type fileConfig struct {
@@ -76,6 +92,8 @@ type fileConfig struct {
 	// Runtime is "openclaw" or "hermes"; empty means found automatically.
 	Runtime    string `json:"runtime,omitempty"`
 	HermesHome string `json:"hermes_home,omitempty"`
+	// AutomationNames is "shown" or "hidden"; empty means shown.
+	AutomationNames string `json:"automation_names,omitempty"`
 }
 
 func Load() (*Config, error) {
@@ -115,6 +133,7 @@ func Load() (*Config, error) {
 		cfg.Actions = actions.Normalize(fc.Actions)
 		cfg.Runtime = fc.Runtime
 		cfg.HermesHome = fc.HermesHome
+		cfg.AutomationNames = fc.AutomationNames
 	}
 
 	// Ask the runtime's adapter where the runtime listens.
@@ -164,6 +183,13 @@ func Load() (*Config, error) {
 			cfg.Usage = on
 		}
 	}
+	if v := os.Getenv("BEACONCLAW_AUTOMATION_NAMES"); v != "" {
+		cfg.AutomationNames = v
+	}
+	cfg.AutomationNames = strings.ToLower(strings.TrimSpace(cfg.AutomationNames))
+	if cfg.AutomationNames == "" {
+		cfg.AutomationNames = AutomationNamesShown
+	}
 
 	// Load or generate instance ID
 	id, err := loadOrCreateInstanceID()
@@ -190,6 +216,13 @@ func Validate(cfg *Config) error {
 	}
 	if cfg.Runtime != "" && cfg.Runtime != "openclaw" && cfg.Runtime != "hermes" {
 		return fmt.Errorf("unknown runtime %q: use openclaw or hermes", cfg.Runtime)
+	}
+	// A mistyped value stops the agent rather than send names someone meant
+	// to hide.
+	switch cfg.AutomationNames {
+	case "", AutomationNamesShown, AutomationNamesHidden:
+	default:
+		return fmt.Errorf("unknown automation_names %q: use %s or %s", cfg.AutomationNames, AutomationNamesShown, AutomationNamesHidden)
 	}
 	if cfg.OpenClawPort < 1 || cfg.OpenClawPort > 65535 {
 		return fmt.Errorf("invalid OpenClaw port: %d", cfg.OpenClawPort)
@@ -240,6 +273,18 @@ func writePrivate(path string, data []byte) error {
 // acknowledged.
 func OutboxPath() string {
 	return filepath.Join(stateDirectory(), "outbox.json")
+}
+
+// AutomationsCursorPath is where this profile records which scheduled-job runs
+// it has already reported, so a restart does not report them again.
+func AutomationsCursorPath() string {
+	return filepath.Join(stateDirectory(), "automations.json")
+}
+
+// SavePrivate writes a file in this profile's folder that only this user may
+// read.
+func SavePrivate(path string, data []byte) error {
+	return writePrivate(path, data)
 }
 
 func stateDirectory() string {

@@ -20,7 +20,7 @@ Unconfirmed heartbeats are kept on disk, so a restart does not lose them. In an 
 
 ## What It Sends
 
-Outbound-only means nothing connects in to your machine. It does not mean no data leaves it. This is everything the agent sends. Everything but the inventory goes every 30 seconds:
+Outbound-only means nothing connects in to your machine. It does not mean no data leaves it. This is everything the agent sends. Everything but the inventory, usage and automations goes every 30 seconds:
 
 | Group | Fields |
 |-------|--------|
@@ -30,6 +30,7 @@ Outbound-only means nothing connects in to your machine. It does not mean no dat
 | Runtime (OpenClaw or Hermes gateway) | Which runtime it is; whether it is present, healthy and ready; names of failing channels; uptime; gateway port (OpenClaw); runtime version |
 | Inventory (every 15 minutes) | Names of the skills the runtime has loaded and where each comes from (for example, shipped with the runtime or added on this machine); names of the chat channels, tool servers and model providers it is set up to use; the names of the systems it holds a credential for (for example "Jira"), and how many declared credentials were not recognised; the commit of the runtime's workspace folder and whether that folder has uncommitted changes |
 | Usage (every hour) | For today and yesterday, as numbers only: how many conversations had activity, how many user messages, assistant messages and tool calls, the tokens used and what the runtime says they cost, in total and split by where the conversations came from (for example a chat service or a schedule) |
+| Automations (every 5 minutes) | For each scheduled job the runtime has: its id, its name (or "Automation 1", "Automation 2" and so on; see [Hiding automation names](#hiding-automation-names)), whether it is switched on, and when it runs (a cron expression and time zone, or an interval, or the runtime's own short description such as "every 15m"). The job list is sent only when it changes, and once after each start or reconnection; a fingerprint of it goes every time. For each job: when it runs next and last ran, how the last run went (ok, error, skipped or missed), how long it took, how many errors in a row, whether its result was delivered, and a one-word kind of error. For each run that finished since the last report: the job, when it started, how long it took, how it went, whether its result was delivered, and the kind of error |
 | Agent | BeaconClaw agent version, protocol version, and what the runtime adapter can report (sent once per connection) |
 
 The runtime's state is sent twice in each heartbeat: once in a form that fits any runtime, and once in the original OpenClaw-named form, so that a manager on either protocol version understands it. Both carry the same facts.
@@ -42,6 +43,7 @@ What it does not do, as of this version:
 - **BeaconClaw never opens your environment file.** To learn which systems the runtime can reach, it asks OpenClaw which skills are ready and which credentials they declare (the same `openclaw skills list --json` output). A credential counts when a usable skill declares it and OpenClaw does not report it missing. BeaconClaw sees the credential's name, never its value, and a variable that no skill declares is never seen at all.
 - A credential's name is turned into a system's name by a list that ships with the agent ([`internal/catalogue/systems.txt`](internal/catalogue/systems.txt)): `JIRA_API_TOKEN` is sent as "Jira". A name the list does not recognise is not sent; only the number of such names is. `beaconclaw inventory` shows on the machine which systems are sent and which names stayed behind. To add a system to the list, add a line and open a pull request.
 - For usage it runs `openclaw gateway call sessions.usage` once for each of the two days and keeps the counts listed above. From each conversation it reads only its channel and its message counts. It does not read or send conversation names, contents, participants, tool names or file names. If the runtime has not finished counting a day, that day is left out rather than sent as zero.
+- For automations it runs `openclaw cron list --json --all`, and `openclaw cron runs <job> --limit 20 --json` for a job that may run more than once between two reports. It never sends a job's message or command, model, options, delivery target, output, run summary or session. An error's text stays on the machine: it is sorted here into one of `rate_limit`, `timeout`, `auth`, `delivery`, `model`, `script` or `error`, and only that word is sent. To avoid reporting a run twice after a restart, it keeps the time of the last run it reported for each job in `automations.json` in the agent's config folder.
 - If the workspace folder is a git checkout it runs `git rev-parse HEAD` and `git status --porcelain` there, and sends the commit and a yes or no for uncommitted changes. It does not send the repository's address, branch names, file names or contents.
 - To learn the OpenClaw version it looks for the running gateway among the machine's processes, by command line, and reads the `name` and `version` fields of that copy's `package.json`. Command lines of other processes are not kept or sent. If that finds nothing, it follows the `openclaw` command to its package and reads the same two fields, and as a last resort runs `openclaw --version`.
 - When you run `beaconclaw maintenance start` or `end`, it sends one request to the manager with the agent's token: the reason you typed and the length in minutes, or nothing for `end`. This is the only thing it sends that you type yourself. The token can only put its own agent into maintenance.
@@ -49,7 +51,7 @@ What it does not do, as of this version:
 - With a remote action switched on, and only when one is asked for, it sends back the result: for `diagnostics`, each check's name, whether it passed and a short state such as a version or "41% used"; for `restart_gateway`, whether the gateway answered again, whether the runtime's restart command reported an error, and how many seconds the gateway took to answer after that command returned. A refused request sends back the reason. When it connects it also sends the names of the actions you have switched on.
 - It opens no listening ports.
 
-The points above about `openclaw.json`, `openclaw skills list`, credentials, `sessions.usage` and the version describe an OpenClaw machine. On a Hermes machine, see the next section.
+The points above about `openclaw.json`, `openclaw skills list`, credentials, `sessions.usage`, `openclaw cron` and the version describe an OpenClaw machine. On a Hermes machine, see the next section.
 
 ### Hermes Agent
 
@@ -58,6 +60,7 @@ On a machine running [Hermes Agent](https://github.com/NousResearch/hermes-agent
 - **Health:** `gateway_state.json`, the file the Hermes gateway rewrites at least once a minute. It keeps the gateway's state, each messaging platform's state, the gateway's process ID and the Hermes version. The gateway counts as healthy when its process is alive, its state is running (or degraded or draining), and the file is less than two minutes old. A file that has stopped being rewritten while the process is still alive is reported as a failing `gateway`: the case where Hermes still says "connected" but has stopped working. A platform that is retrying, disconnected, failed or needs attention is reported by name.
 - **Inventory:** the names of the folders under `skills/` that hold a `SKILL.md`, marked as shipped with Hermes when they appear in its `.bundled_manifest`; the names of the platforms in the state file; and, from `config.yaml`, the names of the platforms switched on, the entries under `mcp_servers` and `providers`, and `model.provider`. It reads nothing inside those entries. Hermes has no list of declared credentials, so no system names are sent.
 - **Usage:** `state.db`, opened read-only. For each day it counts conversations with activity, user and assistant messages, tool results and tokens, split by where the conversation came from (for example `telegram` or `cron`). Cost is Hermes's own figure for each conversation (actual where its provider reports it, otherwise estimated), shared across the days the conversation was active in proportion to its tokens. It reads only roles, timestamps, token counts, costs and the conversation's source. It never reads a message's text.
+- **Automations:** `cron/jobs.json`, for each job's id, name, whether it is switched on or paused, schedule, time zone, next and last run, last outcome and failures in a row; and `cron/executions.db`, opened read-only, for each finished run's id, job, outcome, start and finish times and delivery outcome. It also reads the `timezone` setting in `config.yaml`, which Hermes reads cron expressions in. It never sends a job's prompt, script, model, skills or delivery target. A failed run's error text is read only to be sorted into one word, as for OpenClaw, and is not sent. Runs of a job that is no longer listed are left out. The finish time of the newest run reported is kept in `automations.json` in the agent's config folder.
 - **Revision:** if Hermes's home folder is a git checkout, the commit it is at and whether it has uncommitted changes, as for an OpenClaw workspace. Nothing about the repository's origin.
 - **Version:** the `code_version` Hermes writes into its state file.
 - **It never opens Hermes's `.env` file** or `auth.json`.
@@ -221,6 +224,7 @@ Every command acts on one profile and leaves the others alone. Choose the profil
 | `BEACONCLAW_INVENTORY` | `false` to stop reporting skill and connection names | `true` |
 | `BEACONCLAW_INVENTORY_ALL_NAMES` | `true` to also send the names of declared credentials the list does not recognise | `false` |
 | `BEACONCLAW_USAGE` | `false` to stop reporting daily usage counts | `true` |
+| `BEACONCLAW_AUTOMATION_NAMES` | `hidden` to send "Automation 1", "Automation 2" and so on in place of scheduled jobs' names | `shown` |
 
 `beaconclaw update` also reads `GITHUB_TOKEN` if it is set, and sends it to GitHub only to raise the download rate limit. `BEACONCLAW_RELEASES_API` and `BEACONCLAW_RELEASES_DOWNLOAD` point the updater at another release host for testing; it must be an `https` address unless it is on this machine.
 
@@ -241,6 +245,12 @@ Off by default. To also send the names of declared credentials the list does not
 ### Switching usage off
 
 Usage is on by default. To stop it, set `"usage": false` in the config file or `BEACONCLAW_USAGE=false` in the service's environment, then restart the agent. The inventory and usage switches are independent.
+
+### Hiding automation names
+
+Scheduled jobs' names are sent as they are by default. To send "Automation 1", "Automation 2" and so on instead, numbered in order of the jobs' ids, set `"automation_names": "hidden"` in the config file or `BEACONCLAW_AUTOMATION_NAMES=hidden` in the service's environment, then restart the agent. Any value other than `shown` or `hidden` stops the agent from starting, so a typing mistake cannot send names you meant to hide. Ids, schedules and outcomes are still sent.
+
+Automations are reported for OpenClaw and Hermes. A runtime without a scheduler, or an OpenClaw gateway that does not answer, sends nothing for them; if one listing fails or takes longer than two minutes, nothing is sent that time.
 
 ### Remote actions
 
@@ -281,7 +291,8 @@ Optional. Place at `~/.beaconclaw/config.json`:
   "runtime": "openclaw",
   "channel": "stable",
   "inventory": true,
-  "usage": true
+  "usage": true,
+  "automation_names": "shown"
 }
 ```
 
@@ -337,8 +348,8 @@ internal/
   config/            Config loading and validation
   heartbeat/         Payload assembly and system metrics
   outbox/            Heartbeats waiting to be acknowledged, kept on disk
-  hermes/            The Hermes Agent adapter: state file, inventory, usage, restart
-  openclaw/          The OpenClaw adapter: health probes, version and port lookup
+  hermes/            The Hermes Agent adapter: state file, inventory, usage, automations, restart
+  openclaw/          The OpenClaw adapter: health probes, version and port lookup, inventory, usage, automations
   runtimes/          Picks the adapter for the runtime on this machine
   profile/           Named profiles: separate copies on one machine
   update/            Release lookup, checksum verification, binary replacement

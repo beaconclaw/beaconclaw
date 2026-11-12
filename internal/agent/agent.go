@@ -34,6 +34,11 @@ const (
 	// How often the runtime's usage is counted, and how soon after starting.
 	defaultUsageEvery = time.Hour
 	defaultUsageDelay = 2 * time.Minute
+	// How often the runtime's scheduled jobs are listed, how soon after
+	// starting, and how long one listing may take before it is given up.
+	defaultAutomationsEvery   = 5 * time.Minute
+	defaultAutomationsDelay   = 30 * time.Second
+	defaultAutomationsTimeout = 2 * time.Minute
 )
 
 // Agent is the main daemon orchestrator.
@@ -56,6 +61,13 @@ type Agent struct {
 	usageEvery     time.Duration
 	usageDelay     time.Duration
 
+	automationsEvery   time.Duration
+	automationsDelay   time.Duration
+	automationsTimeout time.Duration
+	// automationsCursor is the file that records which runs were reported.
+	// Empty keeps no file.
+	automationsCursor string
+
 	// The fields below belong to the Run loop alone.
 	connecting bool
 	// sent holds when each unacknowledged heartbeat was last sent on the
@@ -69,6 +81,12 @@ type Agent struct {
 	inventory *heartbeat.Inventory
 	// usage is waiting to go out with the next heartbeat.
 	usage *heartbeat.Usage
+	// automations are waiting to go out with the next heartbeat.
+	automations *heartbeat.Automations
+	// automationsHash is the definitions hash last put in a heartbeat. The
+	// job definitions are sent again only when it changes. Empty after a
+	// start, a new connection or a heartbeat given up on, so they are sent.
+	automationsHash string
 	// managerAgentID is the manager's own ID for this agent, as it said when
 	// the agent registered. A command for any other agent is refused.
 	managerAgentID string
@@ -99,8 +117,13 @@ func New(cfg *config.Config) *Agent {
 		inventoryDelay: defaultInventoryDelay,
 		usageEvery:     defaultUsageEvery,
 		usageDelay:     defaultUsageDelay,
-		sent:           map[uint64]time.Time{},
-		attempts:       map[uint64]int{},
+
+		automationsEvery:   defaultAutomationsEvery,
+		automationsDelay:   defaultAutomationsDelay,
+		automationsTimeout: defaultAutomationsTimeout,
+		automationsCursor:  config.AutomationsCursorPath(),
+		sent:               map[uint64]time.Time{},
+		attempts:           map[uint64]int{},
 	}
 }
 
@@ -125,6 +148,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	defer ackTicker.Stop()
 	inventories := a.watchInventory(ctx)
 	usages := a.watchUsage(ctx)
+	automationReports := a.watchAutomations(ctx)
 
 	for {
 		select {
@@ -144,6 +168,14 @@ func (a *Agent) Run(ctx context.Context) error {
 		case usage := <-usages:
 			a.usage = &usage
 			log.Printf("usage counted (%d days)", len(usage.Days))
+
+		case automations := <-automationReports:
+			// Runs not yet sent are kept: each report holds only new ones.
+			if a.automations != nil {
+				automations = a.automations.Merge(automations)
+			}
+			a.automations = &automations
+			log.Printf("automations listed (%d jobs, %d new runs)", len(automations.States), len(automations.Runs))
 
 		case <-connected:
 			a.connecting = false
@@ -176,6 +208,12 @@ func (a *Agent) collect(ctx context.Context) {
 	a.inventory = nil
 	payload.Usage = a.usage
 	a.usage = nil
+	if a.automations != nil {
+		a.automations.OmitUnchangedJobs(a.automationsHash)
+		a.automationsHash = a.automations.DefinitionsHash
+		payload.Automations = a.automations
+		a.automations = nil
+	}
 	data, err := json.Marshal(payload)
 	if err != nil {
 		log.Printf("could not encode heartbeat seq=%d: %v", payload.Seq, err)
@@ -279,6 +317,93 @@ func (a *Agent) watchUsage(ctx context.Context) <-chan heartbeat.Usage {
 	return out
 }
 
+// watchAutomations lists the runtime's scheduled jobs, shortly after starting
+// and then every few minutes, on the side like the inventory. A listing that
+// fails or takes too long sends nothing that time. The channel is nil for a
+// runtime that cannot list them, so nothing is ever sent for it.
+func (a *Agent) watchAutomations(ctx context.Context) <-chan heartbeat.Automations {
+	source, ok := a.runtime.(adapter.Automationer)
+	if !ok || !adapter.Supports(a.runtime, adapter.CapAutomations) {
+		return nil
+	}
+	every := a.automationsEvery
+	if every <= 0 {
+		every = defaultAutomationsEvery
+	}
+	timeout := a.automationsTimeout
+	if timeout <= 0 {
+		timeout = defaultAutomationsTimeout
+	}
+	hide := a.cfg.HideAutomationNames()
+
+	out := make(chan heartbeat.Automations)
+	go func() {
+		cursor := a.loadAutomationsCursor()
+		wait := a.automationsDelay
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(wait):
+			}
+			wait = every
+
+			listCtx, cancel := context.WithTimeout(ctx, timeout)
+			report, ok := source.Automations(listCtx, cursor)
+			late := listCtx.Err() != nil
+			cancel()
+			if !ok || late {
+				continue
+			}
+			select {
+			case out <- heartbeat.NewAutomations(report, hide, time.Now()):
+			case <-ctx.Done():
+				return
+			}
+			if report.Cursor != nil {
+				cursor = report.Cursor
+				a.saveAutomationsCursor(cursor)
+			}
+		}
+	}()
+	return out
+}
+
+// automationsCursorFile is what is kept on disk: the adapter's own record of
+// which runs it reported, and which runtime that record belongs to.
+type automationsCursorFile struct {
+	Runtime string          `json:"runtime"`
+	Cursor  json.RawMessage `json:"cursor"`
+}
+
+func (a *Agent) loadAutomationsCursor() []byte {
+	if a.automationsCursor == "" {
+		return nil
+	}
+	data, err := os.ReadFile(a.automationsCursor)
+	if err != nil {
+		return nil
+	}
+	var file automationsCursorFile
+	if json.Unmarshal(data, &file) != nil || file.Runtime != a.runtime.Name() {
+		return nil
+	}
+	return file.Cursor
+}
+
+func (a *Agent) saveAutomationsCursor(cursor []byte) {
+	if a.automationsCursor == "" || !json.Valid(cursor) {
+		return
+	}
+	data, err := json.Marshal(automationsCursorFile{Runtime: a.runtime.Name(), Cursor: cursor})
+	if err != nil {
+		return
+	}
+	if err := config.SavePrivate(a.automationsCursor, append(data, '\n')); err != nil {
+		log.Printf("could not save the automations cursor: %v", err)
+	}
+}
+
 // flush sends every heartbeat that is waiting and has not yet been sent on
 // this connection, oldest first.
 func (a *Agent) flush(ctx context.Context, connected chan struct{}) {
@@ -298,6 +423,8 @@ func (a *Agent) flush(ctx context.Context, connected chan struct{}) {
 			log.Printf("giving up on heartbeat seq=%d: sent %d times with no acknowledgement", entry.Seq, maxSendAttempts)
 			a.outbox.Drop(entry.Seq)
 			delete(a.attempts, entry.Seq)
+			// It may have carried the job definitions.
+			a.automationsHash = ""
 			continue
 		}
 		if err := a.client.SendHeartbeat(heartbeat.ProtocolVersion, entry.Data); err != nil {
@@ -327,6 +454,8 @@ func (a *Agent) handle(m ws.Message) {
 			a.managerProtocol = 1
 		}
 		a.managerAgentID = m.AgentID
+		// A new connection gets the job definitions again.
+		a.automationsHash = ""
 		log.Printf("registered with manager (manager protocol %d, agent protocol %d)", a.managerProtocol, heartbeat.ProtocolVersion)
 	case "action":
 		a.handleAction(m)
