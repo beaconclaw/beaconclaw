@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/beaconclaw/beaconclaw/internal/adapter"
+	"github.com/beaconclaw/beaconclaw/internal/gitrev"
 )
 
 const (
@@ -303,40 +304,9 @@ func workspaceFromConfig(config map[string]json.RawMessage) string {
 	return agents.Defaults.Workspace
 }
 
-// revisionOf reads the commit a folder is at, and whether it has changes
-// beyond that commit. It returns nil when the folder is not a git checkout or
-// git is not installed. It reads nothing about the repository's origin.
+// revisionOf reads the commit the workspace folder is at; see gitrev.Of.
 func revisionOf(ctx context.Context, dir string) *adapter.Revision {
-	if !filepath.IsAbs(dir) {
-		return nil
-	}
-	commit, err := git(ctx, dir, "rev-parse", "HEAD")
-	if err != nil {
-		return nil
-	}
-	hash := strings.TrimSpace(string(commit))
-	if !commitPattern.MatchString(hash) {
-		return nil
-	}
-	revision := &adapter.Revision{Commit: hash}
-	if changes, err := git(ctx, dir, "status", "--porcelain"); err == nil {
-		revision.Dirty = len(bytes.TrimSpace(changes)) > 0
-	}
-	return revision
-}
-
-func git(ctx context.Context, dir string, args ...string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(ctx, gitTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
-	// Never stop to ask for anything, and take no lock a running agent might want.
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0")
-	var stdout bytes.Buffer
-	cmd.Stdout = &limitedWriter{w: &stdout, n: maxCommandOutput}
-	if err := cmd.Run(); err != nil {
-		return nil, err
-	}
-	return stdout.Bytes(), nil
+	return gitrev.Of(ctx, dir)
 }
 
 // limitedWriter keeps the first n bytes and quietly drops the rest, so a

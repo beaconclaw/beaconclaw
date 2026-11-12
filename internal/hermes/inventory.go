@@ -13,6 +13,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/beaconclaw/beaconclaw/internal/adapter"
+	"github.com/beaconclaw/beaconclaw/internal/gitrev"
 )
 
 // Connection kinds, the same words the OpenClaw adapter uses.
@@ -46,6 +47,9 @@ func (a *Adapter) Inventory(ctx context.Context) adapter.Inventory {
 	return adapter.Inventory{
 		Skills:      a.skills(),
 		Connections: a.connections(),
+		// When Hermes's home is kept under git (to review changes to skills
+		// and settings), the commit it is at, and whether it has changes.
+		Revision: gitrev.Of(ctx, a.home),
 	}
 }
 
