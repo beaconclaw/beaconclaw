@@ -108,6 +108,14 @@ func (a *Agent) perform(ctx context.Context, action string) actionResult {
 			// Nothing was run, so there is nothing to wait for.
 			return actionResult{Result: map[string]string{"reason": "the runtime's command was not found on this machine"}}
 		}
+		if errors.Is(err, adapter.ErrNotRestarted) {
+			// The runtime said no, or the gateway's process never changed: the
+			// gateway may still be answering, but it was not restarted.
+			return actionResult{Result: map[string]any{
+				"restarted": false,
+				"reason":    "the runtime did not restart its gateway, for example because work was in progress",
+			}}
+		}
 		// The runtime's command can report an error although the gateway did
 		// restart, for instance when its own wait runs out first. What counts
 		// is whether the gateway answers again.

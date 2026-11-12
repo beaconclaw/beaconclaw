@@ -68,6 +68,9 @@ func (a *Adapter) Probe(ctx context.Context) adapter.Report {
 
 // installed reports whether OpenClaw exists on this machine even though its
 // gateway is not answering: it has a config file, or its command can be found.
+// Detected reports whether OpenClaw looks installed on this machine.
+func Detected() bool { return installed() }
+
 func installed() bool {
 	for _, path := range configCandidates() {
 		if _, err := os.Stat(path); err == nil {

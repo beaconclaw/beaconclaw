@@ -13,8 +13,8 @@ import (
 	"github.com/beaconclaw/beaconclaw/internal/catalogue"
 	"github.com/beaconclaw/beaconclaw/internal/config"
 	"github.com/beaconclaw/beaconclaw/internal/heartbeat"
-	"github.com/beaconclaw/beaconclaw/internal/openclaw"
 	"github.com/beaconclaw/beaconclaw/internal/outbox"
+	"github.com/beaconclaw/beaconclaw/internal/runtimes"
 	"github.com/beaconclaw/beaconclaw/internal/ws"
 )
 
@@ -83,7 +83,7 @@ type Agent struct {
 }
 
 func New(cfg *config.Config) *Agent {
-	runtime := openclaw.NewAdapter(cfg.OpenClawPort)
+	runtime := runtimes.New(cfg)
 	return &Agent{
 		cfg:            cfg,
 		client:         ws.NewClient(cfg.Endpoint, cfg.Token),

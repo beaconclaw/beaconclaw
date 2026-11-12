@@ -5,7 +5,10 @@
 // works only with the neutral Report.
 package adapter
 
-import "context"
+import (
+	"context"
+	"errors"
+)
 
 // Capability names one thing an adapter can report. An adapter lists the ones
 // it supports, so a missing value can be told apart from an unsupported one.
@@ -164,6 +167,11 @@ func Supports(a Adapter, capability Capability) bool {
 // Restarter is implemented by an adapter that can restart its runtime's
 // gateway the way an operator would by hand. It is used only for the remote
 // action of that name, which is off unless the machine's owner switches it on.
+// ErrNotRestarted is returned by a Restarter that can tell the gateway did not
+// restart, for instance because the runtime refused while work was in progress.
+// The gateway may well still be answering, so this must not count as success.
+var ErrNotRestarted = errors.New("the gateway did not restart")
+
 type Restarter interface {
 	// RestartGateway asks the runtime to restart its gateway and returns when
 	// the runtime's own command has finished. It takes no arguments: what is
