@@ -53,6 +53,12 @@ type Config struct {
 	// Actions are the remote actions switched on on this machine. Empty
 	// unless someone here switched one on; the manager cannot.
 	Actions []string
+	// Runtime names the agent runtime to report on: "openclaw" or "hermes".
+	// Empty means found automatically.
+	Runtime string
+	// HermesHome is Hermes's home directory. Empty means $HERMES_HOME, then
+	// ~/.hermes, as Hermes itself decides.
+	HermesHome string
 }
 
 type fileConfig struct {
@@ -67,6 +73,9 @@ type fileConfig struct {
 	// Actions are the remote actions switched on here. There is no
 	// environment variable for this: it is set only by the actions command.
 	Actions []string `json:"actions,omitempty"`
+	// Runtime is "openclaw" or "hermes"; empty means found automatically.
+	Runtime    string `json:"runtime,omitempty"`
+	HermesHome string `json:"hermes_home,omitempty"`
 }
 
 func Load() (*Config, error) {
@@ -104,6 +113,8 @@ func Load() (*Config, error) {
 			cfg.Usage = *fc.Usage
 		}
 		cfg.Actions = actions.Normalize(fc.Actions)
+		cfg.Runtime = fc.Runtime
+		cfg.HermesHome = fc.HermesHome
 	}
 
 	// Ask the runtime's adapter where the runtime listens.
@@ -123,6 +134,13 @@ func Load() (*Config, error) {
 		if port, err := strconv.Atoi(v); err == nil && port > 0 {
 			cfg.OpenClawPort = port
 		}
+	}
+
+	if v := os.Getenv("BEACONCLAW_RUNTIME"); v != "" {
+		cfg.Runtime = v
+	}
+	if v := os.Getenv("BEACONCLAW_HERMES_HOME"); v != "" {
+		cfg.HermesHome = v
 	}
 
 	if v := os.Getenv("BEACONCLAW_TOKEN"); v != "" {
@@ -169,6 +187,9 @@ func Validate(cfg *Config) error {
 	}
 	if err := checkEndpoint(cfg.Endpoint); err != nil {
 		return err
+	}
+	if cfg.Runtime != "" && cfg.Runtime != "openclaw" && cfg.Runtime != "hermes" {
+		return fmt.Errorf("unknown runtime %q: use openclaw or hermes", cfg.Runtime)
 	}
 	if cfg.OpenClawPort < 1 || cfg.OpenClawPort > 65535 {
 		return fmt.Errorf("invalid OpenClaw port: %d", cfg.OpenClawPort)

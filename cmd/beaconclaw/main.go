@@ -12,14 +12,17 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/beaconclaw/beaconclaw/internal/adapter"
 	"github.com/beaconclaw/beaconclaw/internal/agent"
 	"github.com/beaconclaw/beaconclaw/internal/catalogue"
 	"github.com/beaconclaw/beaconclaw/internal/config"
 	"github.com/beaconclaw/beaconclaw/internal/daemon"
+	"github.com/beaconclaw/beaconclaw/internal/hermes"
 	"github.com/beaconclaw/beaconclaw/internal/maintenance"
 	"github.com/beaconclaw/beaconclaw/internal/openclaw"
 	"github.com/beaconclaw/beaconclaw/internal/outbox"
 	"github.com/beaconclaw/beaconclaw/internal/profile"
+	"github.com/beaconclaw/beaconclaw/internal/runtimes"
 	"github.com/beaconclaw/beaconclaw/internal/update"
 )
 
@@ -44,8 +47,8 @@ func main() {
 	var profileFlag string
 	root := &cobra.Command{
 		Use:   "beaconclaw",
-		Short: "BeaconClaw agent — fleet monitoring sidecar for OpenClaw",
-		Long:  "Lightweight daemon that monitors a local OpenClaw gateway and reports health to the BeaconClaw fleet manager.",
+		Short: "BeaconClaw agent — fleet monitoring sidecar for OpenClaw and Hermes",
+		Long:  "Lightweight daemon that monitors a local agent runtime (OpenClaw or Hermes) and reports health to the BeaconClaw fleet manager.",
 		Run:   runRoot,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			return profile.Resolve(profileFlag, cmd.Flags().Changed("profile"), executablePath())
@@ -77,7 +80,7 @@ func main() {
 // runRoot displays version, daemon status, and help when invoked with no subcommand.
 func runRoot(cmd *cobra.Command, args []string) {
 	fmt.Printf("BeaconClaw %s\n", agent.Version)
-	fmt.Println("Fleet monitoring sidecar for OpenClaw.")
+	fmt.Println("Fleet monitoring sidecar for OpenClaw and Hermes.")
 	fmt.Println()
 
 	s := daemon.GetStatus()
@@ -295,7 +298,7 @@ func maintenanceCmd() *cobra.Command {
 func statusCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
-		Short: "Show daemon and OpenClaw health status",
+		Short: "Show the daemon's and the agent runtime's health",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load()
 			if err != nil {
@@ -306,7 +309,6 @@ func statusCmd() *cobra.Command {
 			fmt.Printf("Version:      %s (track: %s)\n", agent.Version, cfg.Channel)
 			fmt.Printf("Agent ID:     %s\n", cfg.InstanceID)
 			fmt.Printf("Manager:      %s\n", cfg.Endpoint)
-			fmt.Printf("OpenClaw:     http://127.0.0.1:%d\n", cfg.OpenClawPort)
 
 			s := daemon.GetStatus()
 			if s.Installed {
@@ -323,8 +325,9 @@ func statusCmd() *cobra.Command {
 			fmt.Printf("Waiting:      %s\n", waitingHeartbeats(outbox.Open(config.OutboxPath(), cfg.BufferCapacity).Len()))
 			fmt.Println()
 
-			runtime := openclaw.NewAdapter(cfg.OpenClawPort)
+			runtime := runtimes.New(cfg)
 			report := runtime.Probe(context.Background())
+			fmt.Printf("Runtime:      %s (%s)\n", runtime.Name(), runtime.Target())
 
 			// The lines below keep their original wording. The detail lines come
 			// from the adapter's own data.
@@ -338,6 +341,18 @@ func statusCmd() *cobra.Command {
 				}
 				if len(status.FailingChannels) > 0 {
 					fmt.Printf("Failing:      %v\n", status.FailingChannels)
+				}
+			}
+			if status, ok := report.Raw.(hermes.Status); ok {
+				fmt.Printf("Status:       %s\n", status.State)
+				if report.Version != "" {
+					fmt.Printf("Version:      %s\n", report.Version)
+				}
+				if status.UptimeMs > 0 {
+					fmt.Printf("Uptime:       %s\n", formatDuration(status.UptimeMs))
+				}
+				if len(status.Failing) > 0 {
+					fmt.Printf("Failing:      %v\n", status.Failing)
 				}
 			}
 			if !report.Present {
@@ -374,6 +389,23 @@ func inventoryCmd() *cobra.Command {
 			}
 			if !cfg.Inventory {
 				fmt.Println("The inventory is switched off on this machine. Nothing is collected or sent for it.")
+				return nil
+			}
+
+			runtime := runtimes.New(cfg)
+			if runtime.Name() != runtimes.OpenClaw {
+				inventorier, ok := runtime.(adapter.Inventorier)
+				if !ok {
+					fmt.Println("This runtime cannot report what it has loaded.")
+					return nil
+				}
+				found := inventorier.Inventory(cmd.Context())
+				fmt.Printf("BeaconClaw reads the names of what %s has set up. It never opens its environment file, and it never sees a credential.\n\n", runtime.Name())
+				fmt.Printf("Connections (%d):\n", len(found.Connections))
+				for _, connection := range found.Connections {
+					fmt.Printf("  %-15s %s\n", connection.Kind, connection.Name)
+				}
+				fmt.Printf("Skills: %d\n", len(found.Skills))
 				return nil
 			}
 

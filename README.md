@@ -1,6 +1,6 @@
 # BeaconClaw Agent
 
-Fleet monitoring sidecar for [OpenClaw](https://github.com/openclaw/openclaw). Runs alongside each OpenClaw gateway, reports health upstream to the BeaconClaw manager over outbound WebSocket.
+Fleet monitoring sidecar for self-hosted AI agents: [OpenClaw](https://github.com/openclaw/openclaw) and [Hermes Agent](https://github.com/NousResearch/hermes-agent). Runs alongside each agent's gateway, reports health upstream to the BeaconClaw manager over outbound WebSocket.
 
 > **Status:** early software. The hosted BeaconClaw manager is currently invitation-only, so you need an agent token from an existing account to use this.
 
@@ -8,7 +8,7 @@ Fleet monitoring sidecar for [OpenClaw](https://github.com/openclaw/openclaw). R
 
 The agent is a lightweight daemon that:
 
-1. Probes the local OpenClaw gateway (`/health`, `/ready`) every 30 seconds
+1. Checks the local runtime every 30 seconds: for OpenClaw, the gateway's `/health` and `/ready`; for Hermes, the state file its gateway keeps (see [Hermes Agent](#hermes-agent))
 2. Collects system metrics (CPU, memory, disk)
 3. Sends heartbeats to the BeaconClaw manager over WSS
 4. Reconnects with exponential backoff if the connection drops
@@ -27,7 +27,7 @@ Outbound-only means nothing connects in to your machine. It does not mean no dat
 | Identity | Agent ID, timestamp, sequence number |
 | Host | Hostname, operating system, architecture |
 | System metrics | CPU percent; memory total, used and percent; root disk total, used and percent |
-| Runtime (OpenClaw gateway) | Which runtime it is; whether it is present, healthy and ready; names of failing channels; uptime; gateway port; runtime version |
+| Runtime (OpenClaw or Hermes gateway) | Which runtime it is; whether it is present, healthy and ready; names of failing channels; uptime; gateway port (OpenClaw); runtime version |
 | Inventory (every 15 minutes) | Names of the skills the runtime has loaded and where each comes from (for example, shipped with the runtime or added on this machine); names of the chat channels, tool servers and model providers it is set up to use; the names of the systems it holds a credential for (for example "Jira"), and how many declared credentials were not recognised; the commit of the runtime's workspace folder and whether that folder has uncommitted changes |
 | Usage (every hour) | For today and yesterday, as numbers only: how many conversations had activity, how many user messages, assistant messages and tool calls, the tokens used and what the runtime says they cost, in total and split by where the conversations came from (for example a chat service or a schedule) |
 | Agent | BeaconClaw agent version, protocol version, and what the runtime adapter can report (sent once per connection) |
@@ -49,11 +49,25 @@ What it does not do, as of this version:
 - With a remote action switched on, and only when one is asked for, it sends back the result: for `diagnostics`, each check's name, whether it passed and a short state such as a version or "41% used"; for `restart_gateway`, whether the gateway answered again, whether the runtime's restart command reported an error, and how many seconds the gateway took to answer after that command returned. A refused request sends back the reason. When it connects it also sends the names of the actions you have switched on.
 - It opens no listening ports.
 
+The points above about `openclaw.json`, `openclaw skills list`, credentials, `sessions.usage` and the version describe an OpenClaw machine. On a Hermes machine, see the next section.
+
+### Hermes Agent
+
+On a machine running [Hermes Agent](https://github.com/NousResearch/hermes-agent), the agent reads Hermes's home folder (`$HERMES_HOME`, or `~/.hermes`) as follows, and nothing else in it:
+
+- **Health:** `gateway_state.json`, the file the Hermes gateway rewrites at least once a minute. It keeps the gateway's state, each messaging platform's state, the gateway's process ID and the Hermes version. The gateway counts as healthy when its process is alive, its state is running (or degraded or draining), and the file is less than two minutes old. A file that has stopped being rewritten while the process is still alive is reported as a failing `gateway`: the case where Hermes still says "connected" but has stopped working. A platform that is retrying, disconnected, failed or needs attention is reported by name.
+- **Inventory:** the names of the folders under `skills/` that hold a `SKILL.md`, marked as shipped with Hermes when they appear in its `.bundled_manifest`; the names of the platforms in the state file; and, from `config.yaml`, the names of the platforms switched on, the entries under `mcp_servers` and `providers`, and `model.provider`. It reads nothing inside those entries. Hermes has no list of declared credentials, so no system names are sent.
+- **Usage:** `state.db`, opened read-only. For each day it counts conversations with activity, user and assistant messages, tool results and tokens, split by where the conversation came from (for example `telegram` or `cron`). It reads only roles, timestamps, token counts and the conversation's source. It never reads a message's text.
+- **Version:** the `code_version` Hermes writes into its state file.
+- **It never opens Hermes's `.env` file** or `auth.json`.
+
+The runtime is found automatically: a machine with Hermes and no OpenClaw is reported as Hermes. To choose, set `"runtime": "hermes"` (or `"openclaw"`) in the config file, or `BEACONCLAW_RUNTIME`. A Hermes home other than the default is set with `"hermes_home"` or `BEACONCLAW_HERMES_HOME`.
+
 Heartbeats the manager has not yet acknowledged are kept in `outbox.json` in the agent's config folder, readable only by your user, so an outage or a restart does not lose them. By default up to two hours' worth are kept; the oldest are dropped first. They are removed as soon as the manager confirms them.
 
 ## Requirements
 
-- An OpenClaw gateway running locally
+- An OpenClaw or Hermes Agent gateway running locally
 - A BeaconClaw agent token (`bc_` prefix)
 - Go 1.27+ only if you build from source
 
@@ -188,6 +202,8 @@ Every command acts on one profile and leaves the others alone. Choose the profil
 | `BEACONCLAW_TOKEN` | Agent token (required) | — |
 | `BEACONCLAW_ENDPOINT` | Manager WebSocket URL | `wss://api.beaconclaw.ai/ws` |
 | `BEACONCLAW_OPENCLAW_PORT` | Override OpenClaw gateway port | auto-detected |
+| `BEACONCLAW_RUNTIME` | `openclaw` or `hermes` | found automatically |
+| `BEACONCLAW_HERMES_HOME` | Hermes's home folder | `$HERMES_HOME`, then `~/.hermes` |
 | `BEACONCLAW_PROFILE` | Profile to act on | default profile |
 | `BEACONCLAW_INVENTORY` | `false` to stop reporting skill and connection names | `true` |
 | `BEACONCLAW_INVENTORY_ALL_NAMES` | `true` to also send the names of declared credentials the list does not recognise | `false` |
@@ -197,7 +213,7 @@ Every command acts on one profile and leaves the others alone. Choose the profil
 
 The manager address must start with `wss://`. An unencrypted `ws://` address is accepted only for a manager on the same machine.
 
-On Linux, `beaconclaw install` copies your current `PATH` into the service definition so the service can find `openclaw`.
+On Linux, `beaconclaw install` copies your current `PATH` into the service definition so the service can find `openclaw` or `hermes`.
 
 The agent auto-detects the OpenClaw gateway port from `~/.openclaw/openclaw.json`. You can also set `OPENCLAW_GATEWAY_PORT` to override.
 
@@ -220,7 +236,7 @@ An add-on, **off unless you switch it on on this machine**. With an action switc
 | Action | What it does here |
 | :-- | :-- |
 | `diagnostics` | Runs the agent's own checks again (gateway answering and ready, versions, memory, disk) and sends back each check's name and state. Changes nothing. |
-| `restart_gateway` | Runs `openclaw gateway restart`, the command you would run by hand, then reports whether the gateway answered again. Conversations in progress are cut off, and the gateway is away for a few minutes while it stops and starts. |
+| `restart_gateway` | Runs the runtime's own restart, the command you would run by hand, then reports whether the gateway answered again. On OpenClaw that is `openclaw gateway restart`: conversations in progress are cut off, and the gateway is away for a few minutes. On Hermes it is `hermes gateway restart` without `--yes`, so Hermes refuses rather than interrupt a conversation or job in progress; it lets the gateway finish its work and comes back in seconds. A gateway that is completely frozen cannot finish its work, so this restart does not bring it back, and the result says so. |
 
 ```sh
 beaconclaw actions                              # what is on and off
@@ -249,6 +265,7 @@ Optional. Place at `~/.beaconclaw/config.json`:
   "token": "bc_...",
   "endpoint": "wss://api.beaconclaw.ai/ws",
   "openclaw_port": 18789,
+  "runtime": "openclaw",
   "channel": "stable",
   "inventory": true,
   "usage": true
@@ -307,7 +324,9 @@ internal/
   config/            Config loading and validation
   heartbeat/         Payload assembly and system metrics
   outbox/            Heartbeats waiting to be acknowledged, kept on disk
+  hermes/            The Hermes Agent adapter: state file, inventory, usage, restart
   openclaw/          The OpenClaw adapter: health probes, version and port lookup
+  runtimes/          Picks the adapter for the runtime on this machine
   profile/           Named profiles: separate copies on one machine
   update/            Release lookup, checksum verification, binary replacement
   ws/                WebSocket client and reconnection
