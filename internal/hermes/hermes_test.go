@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -166,9 +167,9 @@ func TestUsageCountsByDay(t *testing.T) {
 	day := time.Date(2026, 11, 10, 0, 0, 0, 0, time.UTC)
 	at := func(hours float64) float64 { return float64(day.Unix()) + hours*3600 }
 	statements := []string{
-		`CREATE TABLE sessions (id TEXT PRIMARY KEY, source TEXT)`,
+		`CREATE TABLE sessions (id TEXT PRIMARY KEY, source TEXT, estimated_cost_usd REAL, actual_cost_usd REAL)`,
 		`CREATE TABLE messages (id INTEGER PRIMARY KEY, session_id TEXT, role TEXT, content TEXT, timestamp REAL, token_count INTEGER, active INTEGER, message_uid TEXT)`,
-		`INSERT INTO sessions VALUES ('s1','telegram'),('s2','cli')`,
+		`INSERT INTO sessions VALUES ('s1','telegram',0.35,NULL),('s2','cli',9.99,1.6)`,
 	}
 	for _, statement := range statements {
 		if _, err := db.Exec(statement); err != nil {
@@ -193,6 +194,10 @@ func TestUsageCountsByDay(t *testing.T) {
 		t.Fatalf("got %d days, want 2", len(days))
 	}
 	first := days[0]
+	// s1 (0.35, all on the first day) and 7 of s2's 16 tokens (actual cost 1.6, preferred to the estimate).
+	if first.Cost != 1.05 || days[1].Cost != 0.9 {
+		t.Errorf("cost = %v then %v, want 1.05 then 0.9", first.Cost, days[1].Cost)
+	}
 	if !first.Final || first.Sessions != 2 || first.UserMessages != 2 || first.AssistantMessages != 1 || first.ToolCalls != 1 || first.Tokens != 42 {
 		t.Errorf("first day = %+v", first)
 	}
@@ -201,5 +206,29 @@ func TestUsageCountsByDay(t *testing.T) {
 	}
 	if days[1].Final || days[1].AssistantMessages != 1 {
 		t.Errorf("second day = %+v", days[1])
+	}
+}
+
+func TestRevisionWhenHomeIsUnderGit(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	home := t.TempDir()
+	write(t, filepath.Join(home, "config.yaml"), "model: {}\n")
+	if testAdapter(home, true).Inventory(context.Background()).Revision != nil {
+		t.Fatal("a home that is not a git checkout has no revision")
+	}
+	for _, args := range [][]string{{"init", "-q"}, {"add", "."}, {"-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", "commit", "-qm", "x"}} {
+		if out, err := exec.Command("git", append([]string{"-C", home}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+	}
+	revision := testAdapter(home, true).Inventory(context.Background()).Revision
+	if revision == nil || len(revision.Commit) < 40 || revision.Dirty {
+		t.Fatalf("revision = %+v", revision)
+	}
+	write(t, filepath.Join(home, "config.yaml"), "model: {provider: x}\n")
+	if !testAdapter(home, true).Inventory(context.Background()).Revision.Dirty {
+		t.Error("a changed file must show as dirty")
 	}
 }

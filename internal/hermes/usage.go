@@ -3,6 +3,7 @@ package hermes
 import (
 	"context"
 	"database/sql"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -31,6 +32,31 @@ FROM messages m
 LEFT JOIN sessions s ON s.id = m.session_id
 WHERE m.timestamp >= ? AND m.timestamp < ?
 GROUP BY channel`
+
+// Cost per day. Hermes records an estimated cost per conversation (and an
+// actual one where its provider reports it), not per message. A conversation's
+// cost is shared across the days it was active, in proportion to the tokens of
+// its messages on each day, or to its messages when no tokens are recorded.
+const costQuery = `
+WITH day AS (
+  SELECT session_id, COALESCE(SUM(token_count), 0) AS tokens, COUNT(*) AS messages
+  FROM messages
+  WHERE timestamp >= ? AND timestamp < ? AND (active = 1 OR active IS NULL)
+  GROUP BY session_id
+), whole AS (
+  SELECT session_id, COALESCE(SUM(token_count), 0) AS tokens, COUNT(*) AS messages
+  FROM messages
+  WHERE session_id IN (SELECT session_id FROM day) AND (active = 1 OR active IS NULL)
+  GROUP BY session_id
+)
+SELECT COALESCE(SUM(
+  COALESCE(s.actual_cost_usd, s.estimated_cost_usd, 0) *
+  CASE WHEN whole.tokens > 0 THEN 1.0 * day.tokens / whole.tokens
+       ELSE 1.0 * day.messages / whole.messages END
+), 0)
+FROM day
+JOIN whole ON whole.session_id = day.session_id
+JOIN sessions s ON s.id = day.session_id`
 
 // Usage returns the counts for each UTC day asked for. A day before today is
 // final. When the store cannot be read, it returns nothing.
@@ -89,6 +115,12 @@ func usageForDay(ctx context.Context, db *sql.DB, start time.Time) (adapter.Usag
 	}
 	if rows.Err() != nil {
 		return adapter.UsageDay{}, false
+	}
+	rows.Close()
+	// A store without cost columns still gives its counts.
+	var cost float64
+	if db.QueryRowContext(ctx, costQuery, from, to).Scan(&cost) == nil {
+		day.Cost = math.Round(cost*10000) / 10000
 	}
 	sort.Slice(day.Channels, func(i, j int) bool { return day.Channels[i].Channel < day.Channels[j].Channel })
 	return day, true
