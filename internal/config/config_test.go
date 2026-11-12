@@ -152,3 +152,55 @@ func TestAutomationNames(t *testing.T) {
 		}
 	}
 }
+
+func TestAutomationsAndSignalsSwitches(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("BEACONCLAW_TOKEN", "")
+	t.Setenv("BEACONCLAW_ENDPOINT", "")
+	t.Setenv("BEACONCLAW_AUTOMATIONS", "")
+	t.Setenv("BEACONCLAW_SIGNALS", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Automations || !cfg.Signals {
+		t.Errorf("defaults: automations=%v signals=%v, want both on", cfg.Automations, cfg.Signals)
+	}
+
+	// The config file switches them off.
+	if err := writeFileConfig(&fileConfig{Automations: boolPtr(false), Signals: boolPtr(false)}); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, err = Load(); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Automations || cfg.Signals {
+		t.Errorf("file off: automations=%v signals=%v", cfg.Automations, cfg.Signals)
+	}
+
+	// The environment overrides the file; a value that is not a boolean is
+	// ignored, as for the other switches.
+	t.Setenv("BEACONCLAW_AUTOMATIONS", "true")
+	t.Setenv("BEACONCLAW_SIGNALS", "maybe")
+	if cfg, err = Load(); err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Automations || cfg.Signals {
+		t.Errorf("env: automations=%v signals=%v", cfg.Automations, cfg.Signals)
+	}
+
+	if err := writeFileConfig(&fileConfig{}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BEACONCLAW_AUTOMATIONS", "0")
+	t.Setenv("BEACONCLAW_SIGNALS", "false")
+	if cfg, err = Load(); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Automations || cfg.Signals {
+		t.Errorf("env off: automations=%v signals=%v", cfg.Automations, cfg.Signals)
+	}
+}
+
+func boolPtr(b bool) *bool { return &b }

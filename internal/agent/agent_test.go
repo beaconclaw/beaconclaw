@@ -76,6 +76,7 @@ type manager struct {
 	inventories []string // the inventory of each heartbeat that carried one
 	usages      []string // the usage of each heartbeat that carried it
 	automations []string // the automations of each heartbeat that carried them
+	signals     []string // the signals of each heartbeat that carried them
 }
 
 func newManager(t *testing.T) *manager {
@@ -110,6 +111,7 @@ func newManager(t *testing.T) *manager {
 					Inventory   json.RawMessage `json:"inventory"`
 					Usage       json.RawMessage `json:"usage"`
 					Automations json.RawMessage `json:"automations"`
+					Signals     json.RawMessage `json:"signals"`
 				} `json:"payload"`
 			}
 			if json.Unmarshal(data, &msg) != nil {
@@ -129,6 +131,9 @@ func newManager(t *testing.T) *manager {
 				}
 				if len(msg.Payload.Automations) > 0 {
 					m.automations = append(m.automations, string(msg.Payload.Automations))
+				}
+				if len(msg.Payload.Signals) > 0 {
+					m.signals = append(m.signals, string(msg.Payload.Signals))
 				}
 				silent := m.silent
 				hangUp := m.hangUpAfter > 0 && len(m.received) >= m.hangUpAfter
@@ -172,12 +177,22 @@ func start(t *testing.T, m *manager, outboxPath string) (*outbox.Outbox, func())
 
 func startWith(t *testing.T, m *manager, outboxPath string, runtime adapter.Adapter, inventory bool) (*outbox.Outbox, func()) {
 	t.Helper()
+	return startWithConfig(t, m, outboxPath, runtime, func(cfg *config.Config) {
+		cfg.Inventory, cfg.Usage, cfg.Automations, cfg.Signals = inventory, inventory, inventory, inventory
+	})
+}
+
+// startWithConfig is startWith with the reporting switches set by change.
+func startWithConfig(t *testing.T, m *manager, outboxPath string, runtime adapter.Adapter, change func(*config.Config)) (*outbox.Outbox, func()) {
+	t.Helper()
+	cfg := &config.Config{InstanceID: "agent-1", Endpoint: m.url()}
+	change(cfg)
 	cursorPath := filepath.Join(filepath.Dir(outboxPath), "automations.json")
 	box := outbox.Open(outboxPath, 50)
 	client := ws.NewClient(m.url(), "bc_test")
 	client.SetTiming(ws.Timing{PingEvery: 50 * time.Millisecond, SilentAfter: 300 * time.Millisecond})
 	a := &Agent{
-		cfg:       &config.Config{InstanceID: "agent-1", Endpoint: m.url(), Inventory: inventory, Usage: inventory},
+		cfg:       cfg,
 		client:    client,
 		collector: heartbeat.NewCollector("agent-1", runtime),
 		runtime:   runtime,
@@ -190,12 +205,15 @@ func startWith(t *testing.T, m *manager, outboxPath string, runtime adapter.Adap
 		automationsDelay:  50 * time.Millisecond,
 		automationsEvery:  120 * time.Millisecond,
 		automationsCursor: cursorPath,
-		outbox:            box,
-		interval:          40 * time.Millisecond,
-		ackTimeout:        200 * time.Millisecond,
-		ackCheck:          20 * time.Millisecond,
-		sent:              map[uint64]time.Time{},
-		attempts:          map[uint64]int{},
+		// Signals are collected a few times within a test.
+		signalsDelay: 50 * time.Millisecond,
+		signalsEvery: 100 * time.Millisecond,
+		outbox:       box,
+		interval:     40 * time.Millisecond,
+		ackTimeout:   200 * time.Millisecond,
+		ackCheck:     20 * time.Millisecond,
+		sent:         map[uint64]time.Time{},
+		attempts:     map[uint64]int{},
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})

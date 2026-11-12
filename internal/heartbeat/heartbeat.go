@@ -50,6 +50,11 @@ type Payload struct {
 	// Like the inventory, they are gathered on the side and sent with the next
 	// heartbeat. Left out entirely for a runtime that cannot list them.
 	Automations *Automations `json:"automations,omitempty"`
+	// Signals are the runtime's housekeeping state (credential health,
+	// pending approvals, backups, updates, audits). They are gathered hourly
+	// on the side and sent only when they changed, and once after each start
+	// or reconnection.
+	Signals *Signals `json:"signals,omitempty"`
 	// Report is the neutral reading of the same probe. It is for the agent's
 	// own use and is not sent.
 	Report adapter.Report `json:"-"`
