@@ -109,6 +109,9 @@ func (a *Agent) Run(ctx context.Context) error {
 	log.Printf("beaconclaw agent starting (agent=%s)", a.cfg.InstanceID)
 	log.Printf("manager endpoint: %s", a.cfg.Endpoint)
 	log.Printf("%s gateway: %s", a.runtime.Name(), a.runtime.Target())
+	if runtimes.Choose(a.cfg).Both {
+		log.Print(runtimes.BothAdvice())
+	}
 	if waiting := a.outbox.Len(); waiting > 0 {
 		log.Printf("%d heartbeats from before this start are waiting to be sent", waiting)
 	}
