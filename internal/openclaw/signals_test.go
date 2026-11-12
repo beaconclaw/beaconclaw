@@ -59,7 +59,11 @@ var modelsStatusFixture = `[plugins] loading 3 plugins {quietly}
       "profiles": [
         {"profileId": "PROFILE-ID-777", "provider": "anthropic", "type": "oauth", "source": "store", "label": "work-account@example.com", "status": "ok", "expiresAt": ` + jsonInt(ms(signalsNow.Add(72*time.Hour))) + `, "remainingMs": 1},
         {"profileId": "groq:default", "provider": "groq", "type": "api_key", "source": "store", "label": "groq:default", "status": "static"},
-        {"profileId": "github-copilot:me", "provider": "github-copilot", "type": "token", "source": "store", "label": "Someone Example", "status": "expired", "expiresAt": ` + jsonInt(ms(signalsNow.Add(-time.Hour))) + `}
+        {"profileId": "github-copilot:me", "provider": "github-copilot", "type": "token", "source": "store", "label": "Someone Example", "status": "expired", "expiresAt": ` + jsonInt(ms(signalsNow.Add(-time.Hour))) + `},
+        {"profileId": "PROFILE-ID-777", "provider": "google", "type": "oauth", "label": "work-account@example.com", "status": "expired", "expiresAt": ` + jsonInt(ms(signalsNow.Add(-time.Hour))) + `},
+        {"profileId": "PROFILE-ID-777", "provider": "openai-codex", "type": "oauth", "label": "work-account@example.com", "status": "expired", "reasonCode": "expired"},
+        {"profileId": "PROFILE-ID-777", "provider": "minimax", "type": "oauth", "label": "Someone Example (saved, inactive)", "status": "missing", "reasonCode": "setup_inactive"},
+        {"profileId": "PROFILE-ID-777", "provider": "zai", "type": "token", "label": "Someone Example", "status": "ok", "expiresAt": ` + jsonInt(ms(signalsNow.Add(72*time.Hour))) + `}
       ],
       "providers": [
         {"provider": "anthropic", "status": "ok", "expiresAt": ` + jsonInt(ms(signalsNow.Add(72*time.Hour))) + `},
@@ -180,7 +184,11 @@ func TestSignalsFromEveryCommand(t *testing.T) {
 		got[c.Provider] = c
 	}
 	want := map[string]struct{ kind, status string }{
-		"anthropic":      {adapter.CredentialOAuth, adapter.CredentialExpiring},
+		"anthropic":      {adapter.CredentialOAuth, adapter.CredentialOK},
+		"google":         {adapter.CredentialOAuth, adapter.CredentialOK},
+		"openai-codex":   {adapter.CredentialOAuth, adapter.CredentialFailing},
+		"minimax":        {adapter.CredentialOAuth, adapter.CredentialOK},
+		"zai":            {adapter.CredentialToken, adapter.CredentialExpiring},
 		"openai":         {adapter.CredentialEnv, adapter.CredentialOK},
 		"groq":           {adapter.CredentialAPIKey, adapter.CredentialFailing},
 		"github-copilot": {adapter.CredentialToken, adapter.CredentialExpired},
@@ -197,8 +205,15 @@ func TestSignalsFromEveryCommand(t *testing.T) {
 			t.Errorf("%s = %+v, want kind %s status %s", provider, c, w.kind, w.status)
 		}
 	}
-	if exp := got["anthropic"].ExpiresAt; exp == nil || !exp.Equal(signalsNow.Add(72*time.Hour)) {
-		t.Errorf("anthropic expires_at = %v", exp)
+	// An OAuth sign-in renews itself: the expiry of its access token is
+	// neither sent nor judged.
+	for _, provider := range []string{"anthropic", "google", "openai-codex"} {
+		if got[provider].ExpiresAt != nil {
+			t.Errorf("%s expires_at = %v, want null", provider, got[provider].ExpiresAt)
+		}
+	}
+	if exp := got["zai"].ExpiresAt; exp == nil || !exp.Equal(signalsNow.Add(72*time.Hour)) {
+		t.Errorf("token expires_at = %v", exp)
 	}
 	if got["openai"].ExpiresAt != nil || got["groq"].ExpiresAt != nil {
 		t.Error("a credential that does not expire was given an expiry")
@@ -377,7 +392,7 @@ func TestUpdateStatusVariants(t *testing.T) {
 
 func TestCredentialExpiryWindows(t *testing.T) {
 	status := func(expiresIn time.Duration) string {
-		out := `{"auth": {"providers": [], "oauth": {"profiles": [{"provider": "openai-codex", "type": "oauth", "status": "ok", "expiresAt": ` +
+		out := `{"auth": {"providers": [], "oauth": {"profiles": [{"provider": "copilot", "type": "token", "status": "ok", "expiresAt": ` +
 			jsonInt(ms(signalsNow.Add(expiresIn))) + `}], "providers": []}}}`
 		got, ok := parseModelsStatus([]byte(out), signalsNow)
 		if !ok || len(got) != 1 {
@@ -393,6 +408,15 @@ func TestCredentialExpiryWindows(t *testing.T) {
 	}
 	if s := status(-time.Minute); s != adapter.CredentialExpired {
 		t.Errorf("past = %s", s)
+	}
+	// The same expiries on an OAuth sign-in change nothing.
+	for _, expiresIn := range []time.Duration{6 * 24 * time.Hour, -time.Minute} {
+		out := `{"auth": {"oauth": {"profiles": [{"provider": "openai-codex", "type": "oauth", "status": "expiring", "expiresAt": ` +
+			jsonInt(ms(signalsNow.Add(expiresIn))) + `}]}}}`
+		got, ok := parseModelsStatus([]byte(out), signalsNow)
+		if !ok || len(got) != 1 || got[0].Status != adapter.CredentialOK || got[0].ExpiresAt != nil {
+			t.Errorf("oauth expiring in %s = %+v", expiresIn, got)
+		}
 	}
 	if _, ok := parseModelsStatus([]byte(`{"configPath": "x"}`), signalsNow); ok {
 		t.Error("output without auth gave credentials")

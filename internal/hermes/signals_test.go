@@ -1,9 +1,11 @@
 package hermes
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -73,47 +75,6 @@ func TestPairingListText(t *testing.T) {
 	}
 }
 
-func TestUpdateCheckText(t *testing.T) {
-	cases := []struct {
-		name      string
-		text      string
-		available bool
-		latest    string
-		channel   string
-	}{
-		{"release available", "→ Update channel: stable\n→ Selected release available: stable v0.24.0 (0123456789ab)\n  Run `hermes update` to install it.\n", true, "0.24.0", "stable"},
-		{"up to date with release", "→ Update channel: stable\n✓ Up to date with the latest release (stable v0.23.1 (0123456789ab)).\n", false, "0.23.1", "stable"},
-		{"newer than release", "→ Update channel: stable\n✓ No newer release: stable v0.23.1; this checkout is newer and waits for the next release (`hermes update --set-channel main` follows every commit).\n", false, "0.23.1", "stable"},
-		{"behind main", "→ Update channel: main\n→ Fetching from origin...\n⚕ Update available: 12 commits behind origin/main.\n  Run 'hermes update' to install.\n", true, "", "main"},
-		{"main up to date", "→ Update channel: main\n→ Fetching from origin...\n✓ Already up to date.\n", false, "", "main"},
-		{"coloured", "\x1b[32m✓ Already up to date.\x1b[0m\n", false, "", ""},
-	}
-	for _, c := range cases {
-		got, ok := parseUpdateCheck([]byte(c.text), "0.23.1")
-		if !ok || got.Available != c.available || got.Current == nil || *got.Current != "0.23.1" || got.Security != nil {
-			t.Errorf("%s = %+v, %v", c.name, got, ok)
-			continue
-		}
-		if (got.Latest == nil && c.latest != "") || (got.Latest != nil && *got.Latest != c.latest) {
-			t.Errorf("%s latest = %v, want %q", c.name, got.Latest, c.latest)
-		}
-		if (got.Channel == nil && c.channel != "") || (got.Channel != nil && *got.Channel != c.channel) {
-			t.Errorf("%s channel = %v, want %q", c.name, got.Channel, c.channel)
-		}
-	}
-
-	// A check Hermes could not make is not reported.
-	for name, text := range map[string]string{
-		"container":   "✗ ``hermes update`` doesn't apply inside the Docker container.\n\nHermes Agent runs as a published image.\n",
-		"no git":      "✗ Not a git repository — cannot check for updates.\n",
-		"unreachable": "→ Update channel: stable\n✗ Could not resolve the stable source channel: timed out\n",
-	} {
-		if got, ok := parseUpdateCheck([]byte(text), "0.23.1"); ok {
-			t.Errorf("%s = %+v, want left out", name, got)
-		}
-	}
-}
-
 func TestBackupsFolder(t *testing.T) {
 	home := t.TempDir()
 	a := &Adapter{home: home}
@@ -158,15 +119,44 @@ func TestBackupsFolder(t *testing.T) {
 
 func TestHermesSignalsNeverCarryNames(t *testing.T) {
 	pairing, _ := parsePairingList([]byte(pairingWithPending))
-	update, _ := parseUpdateCheck([]byte("→ Update channel: stable\n→ Selected release available: stable v0.24.0 (0123456789ab)\n"), "0.23.1")
-	report := adapter.SignalReport{Pairing: &pairing, Update: &update}
+	report := adapter.SignalReport{Pairing: &pairing}
 	data, err := json.Marshal(heartbeat.NewSignals(report, time.Now()))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, secret := range []string{"user-998877", "Someone Example", "req-0001", "Approved Person", "user-778899", "slack", "0123456789ab"} {
+	for _, secret := range []string{"user-998877", "Someone Example", "req-0001", "Approved Person", "user-778899", "slack"} {
 		if strings.Contains(string(data), secret) {
 			t.Errorf("sent %q: %s", secret, data)
 		}
+	}
+}
+
+// TestHermesSignalsRunOnlyThePairingList runs Signals against a stand-in for
+// the hermes command that records what it is asked. Only the pairing list
+// may be run: the update check fetches and tidies the checkout, which a
+// monitor must not do.
+func TestHermesSignalsRunOnlyThePairingList(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a shell script as the hermes command")
+	}
+	bin := t.TempDir()
+	record := filepath.Join(t.TempDir(), "asked")
+	script := "#!/bin/sh\necho \"$@\" >> '" + record + "'\necho 'No pairing data found. No one has tried to pair yet~'\n"
+	if err := os.WriteFile(filepath.Join(bin, "hermes"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+
+	a := &Adapter{home: t.TempDir()}
+	report, ok := a.Signals(context.Background())
+	if !ok || report.Pairing == nil || len(*report.Pairing) != 0 || report.Update != nil || report.Backups != nil {
+		t.Errorf("report = %+v, %v", report, ok)
+	}
+	asked, err := os.ReadFile(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(asked)) != "pairing list" {
+		t.Errorf("hermes was asked:\n%s", asked)
 	}
 }

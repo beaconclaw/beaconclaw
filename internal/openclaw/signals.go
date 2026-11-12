@@ -199,23 +199,22 @@ type modelsStatus struct {
 			Provider string `json:"provider"`
 		} `json:"unusableProfiles"`
 		OAuth *struct {
+			// Profiles lists every stored credential, whatever its type.
 			Profiles []struct {
-				Provider  string   `json:"provider"`
-				Type      string   `json:"type"`
-				Status    string   `json:"status"`
-				ExpiresAt *float64 `json:"expiresAt"`
+				Provider string `json:"provider"`
+				Type     string `json:"type"`
+				// ReasonCode is OpenClaw's short reason a credential cannot
+				// be used as stored, such as "expired" or "unresolved_ref".
+				ReasonCode string   `json:"reasonCode"`
+				ExpiresAt  *float64 `json:"expiresAt"`
 			} `json:"profiles"`
-			Providers []struct {
-				Provider  string   `json:"provider"`
-				Status    string   `json:"status"`
-				ExpiresAt *float64 `json:"expiresAt"`
-			} `json:"providers"`
 		} `json:"oauth"`
 	} `json:"auth"`
 }
 
 // parseModelsStatus works out one entry per provider: the kind of credential,
-// the worst state of its credentials and the soonest expiry.
+// the worst state of its credentials, and for a token with a fixed expiry,
+// the soonest expiry.
 func parseModelsStatus(output []byte, now time.Time) ([]adapter.CredentialSignal, bool) {
 	status, ok := decodeJSON(output, func(s *modelsStatus) bool { return s.Auth != nil })
 	if !ok {
@@ -272,7 +271,11 @@ func parseModelsStatus(output []byte, now time.Time) ([]adapter.CredentialSignal
 		}
 	}
 
-	// Each stored credential, with its expiry.
+	// Each stored credential. An OAuth sign-in renews its access token by
+	// itself, so the token's expiry says nothing about the sign-in: it is
+	// judged only by OpenClaw's reason it cannot be used, which for OAuth
+	// means its renewal failed or it was never completed. A plain token has a
+	// fixed expiry, which is kept.
 	hasProfileKind := map[string]string{}
 	if auth.OAuth != nil {
 		for _, p := range auth.OAuth.Profiles {
@@ -284,36 +287,20 @@ func parseModelsStatus(output []byte, now time.Time) ([]adapter.CredentialSignal
 			if rank(kind) > rank(hasProfileKind[e.Provider]) {
 				hasProfileKind[e.Provider] = kind
 			}
-			expiry(e, p.ExpiresAt)
-		}
-		// OpenClaw's own judgement per provider, over the credentials it
-		// would use.
-		judged := map[string]bool{}
-		for _, p := range auth.OAuth.Providers {
-			e := entry(p.Provider)
-			if e == nil {
-				continue
-			}
-			judged[e.Provider] = true
-			switch p.Status {
+			switch p.ReasonCode {
+			case "", "ok", "setup_inactive":
+				// Usable, or a saved replacement that is not in use.
 			case "expired":
-				worsen(e, adapter.CredentialExpired)
-			case "missing":
+				if kind == adapter.CredentialToken {
+					worsen(e, adapter.CredentialExpired)
+				} else {
+					worsen(e, adapter.CredentialFailing)
+				}
+			default:
 				worsen(e, adapter.CredentialFailing)
 			}
-			expiry(e, p.ExpiresAt)
-		}
-		// Without that judgement, each credential's own state.
-		for _, p := range auth.OAuth.Profiles {
-			e := entry(p.Provider)
-			if e == nil || judged[e.Provider] {
-				continue
-			}
-			switch p.Status {
-			case "expired":
-				worsen(e, adapter.CredentialExpired)
-			case "missing":
-				worsen(e, adapter.CredentialFailing)
+			if kind == adapter.CredentialToken {
+				expiry(e, p.ExpiresAt)
 			}
 		}
 	}
@@ -347,9 +334,9 @@ func parseModelsStatus(output []byte, now time.Time) ([]adapter.CredentialSignal
 		if e.Kind == "" {
 			e.Kind = adapter.CredentialOther
 		}
-		// An expiry is kept for a sign-in that expires, and judged here: past
-		// is expired, within a week is expiring.
-		if e.Kind != adapter.CredentialOAuth && e.Kind != adapter.CredentialToken {
+		// An expiry is kept only for a token with a fixed one, and judged
+		// here: past is expired, within a week is expiring.
+		if e.Kind != adapter.CredentialToken {
 			e.ExpiresAt = nil
 		}
 		if e.ExpiresAt != nil {

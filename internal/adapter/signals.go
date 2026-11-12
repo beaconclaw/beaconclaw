@@ -31,8 +31,9 @@ const (
 	CredentialMissing  = "missing"
 )
 
-// CredentialExpiringWithin is how soon a sign-in must expire to count as
-// expiring.
+// CredentialExpiringWithin is how soon a token with a fixed expiry must
+// expire to count as expiring. An OAuth sign-in renews its own access token,
+// so it is never judged by that token's expiry.
 const CredentialExpiringWithin = 7 * 24 * time.Hour
 
 // MaxSignalItems is the most entries sent in any one list or map of a signal.
@@ -46,8 +47,8 @@ type CredentialSignal struct {
 	Kind string `json:"kind"`
 	// Status is one of the Credential statuses above.
 	Status string `json:"status"`
-	// ExpiresAt is when the soonest sign-in expires, for a credential that
-	// expires.
+	// ExpiresAt is when the soonest token with a fixed expiry expires. Nil
+	// for every other kind, OAuth included.
 	ExpiresAt *time.Time `json:"expires_at"`
 }
 

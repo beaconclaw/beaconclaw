@@ -29,18 +29,16 @@ const (
 	maxBackupEntries = 10000
 )
 
-// Signals reads what Hermes can tell reliably: whether an update is
-// available, how many pairing requests wait on each platform, and when its
-// newest backup was made. Hermes has no pending-approval queue, and its
-// credential, doctor and audit commands print text that mixes in labels and
-// messages or rewrite state as they run, so those parts are not reported.
+// Signals reads what Hermes can tell reliably without changing anything
+// beyond its own housekeeping: how many pairing requests wait on each
+// platform, and when its newest backup was made. Hermes has no
+// pending-approval queue; its credential, doctor and audit commands print text
+// that mixes in labels and messages or rewrite state as they run; and its
+// update check fetches from its source repository and tidies the checkout. So
+// those parts are not reported. The manager compares the version Hermes
+// reports with the newest release itself.
 func (a *Adapter) Signals(ctx context.Context) (adapter.SignalReport, bool) {
 	report := adapter.SignalReport{}
-	if out, err := a.runSignalCommand(ctx, "update", "--check"); err == nil {
-		if update, ok := parseUpdateCheck(out, a.readStatus().Version); ok {
-			report.Update = &update
-		}
-	}
 	if out, err := a.runSignalCommand(ctx, "pairing", "list"); err == nil {
 		if pairing, ok := parsePairingList(out); ok {
 			report.Pairing = &pairing
@@ -95,64 +93,6 @@ var ansiPattern = regexp.MustCompile("\x1b\\[[0-9;?]*[A-Za-z]")
 func plainLines(output []byte) []string {
 	text := ansiPattern.ReplaceAllString(string(output), "")
 	return strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
-}
-
-var (
-	updateChannelLine = regexp.MustCompile(`^\s*→ Update channel: (\S+)\s*$`)
-	releaseVersion    = regexp.MustCompile(`\bv([0-9]+(?:\.[0-9]+)+(?:-[0-9A-Za-z.]+)?)`)
-)
-
-// updateVerdicts are the lines with which "hermes update --check" ends, and
-// whether each means an update is available.
-var updateVerdicts = []struct {
-	prefix    string
-	available bool
-}{
-	{"✓ Already up to date.", false},
-	{"✓ Up to date with the latest release", false},
-	{"✓ No newer release:", false},
-	{"→ Holding at this build:", false},
-	{"→ This checkout is newer than the selected release:", false},
-	{"→ Selected release available:", true},
-	{"⚕ Update available", true},
-}
-
-// parseUpdateCheck reads the text of "hermes update --check". It reports
-// nothing unless the output ends in one of Hermes's verdicts: a check that
-// could not reach the release channel, or an install Hermes cannot update
-// itself (such as a container image), is left out.
-func parseUpdateCheck(output []byte, current string) (adapter.UpdateSignal, bool) {
-	signal := adapter.UpdateSignal{}
-	found := false
-	for _, line := range plainLines(output) {
-		if m := updateChannelLine.FindStringSubmatch(line); m != nil {
-			if channel := adapter.CleanCode(m[1]); channel != "" {
-				signal.Channel = &channel
-			}
-			continue
-		}
-		trimmed := strings.TrimSpace(line)
-		for _, verdict := range updateVerdicts {
-			if !strings.HasPrefix(trimmed, verdict.prefix) {
-				continue
-			}
-			found = true
-			signal.Available = verdict.available
-			signal.Latest = nil
-			if m := releaseVersion.FindStringSubmatch(trimmed); m != nil {
-				if v := adapter.CleanSignalVersion(strings.TrimRight(m[1], ".")); v != "" {
-					signal.Latest = &v
-				}
-			}
-		}
-	}
-	if !found {
-		return adapter.UpdateSignal{}, false
-	}
-	if v := adapter.CleanSignalVersion(current); v != "" {
-		signal.Current = &v
-	}
-	return signal, true
 }
 
 var (
