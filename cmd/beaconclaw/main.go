@@ -107,15 +107,24 @@ func authCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			token, _ := cmd.Flags().GetString("token")
 			endpoint, _ := cmd.Flags().GetString("endpoint")
+			runtime, _ := cmd.Flags().GetString("runtime")
 			if token == "" {
 				token = os.Getenv("BEACONCLAW_TOKEN")
 			}
-			if token == "" {
+			if token == "" && runtime == "" {
 				return fmt.Errorf("token required: %s auth --token <your-agent-token>", profile.BinaryName())
 			}
 
-			if err := config.SaveToken(token); err != nil {
-				return fmt.Errorf("save token: %w", err)
+			if token != "" {
+				if err := config.SaveToken(token); err != nil {
+					return fmt.Errorf("save token: %w", err)
+				}
+			}
+			if err := saveRuntime(runtime); err != nil {
+				return err
+			}
+			if token == "" {
+				return nil
 			}
 			if endpoint != "" {
 				if err := config.SaveEndpoint(endpoint); err != nil {
@@ -131,8 +140,40 @@ func authCmd() *cobra.Command {
 
 	cmd.Flags().String("token", "", "Agent token (starts with bc_)")
 	cmd.Flags().String("endpoint", "", "Manager WebSocket address to report to (default "+config.DefaultManagerEndpoint+")")
+	cmd.Flags().String("runtime", "", "The agent runtime this copy reports on: openclaw or hermes (default: found on this machine)")
 
 	return cmd
+}
+
+// saveRuntime records the runtime this profile reports on: the one given, or,
+// when only one is installed, that one. With both installed and none given it
+// saves nothing and says how to watch both.
+func saveRuntime(given string) error {
+	if given != "" {
+		if err := config.SaveRuntime(given); err != nil {
+			return err
+		}
+		fmt.Printf("This copy reports on %s.\n", runtimes.Display(given))
+		return nil
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return nil
+	}
+	choice := runtimes.Choose(cfg)
+	switch {
+	case choice.Configured:
+		return nil
+	case choice.Both:
+		fmt.Println(runtimes.BothAdvice())
+		return nil
+	case choice.Name == runtimes.Hermes || openclaw.Detected():
+		if err := config.SaveRuntime(choice.Name); err != nil {
+			return err
+		}
+		fmt.Printf("Found %s. This copy reports on it.\n", runtimes.Display(choice.Name))
+	}
+	return nil
 }
 
 func installCmd() *cobra.Command {
@@ -328,6 +369,9 @@ func statusCmd() *cobra.Command {
 			runtime := runtimes.New(cfg)
 			report := runtime.Probe(context.Background())
 			fmt.Printf("Runtime:      %s (%s)\n", runtime.Name(), runtime.Target())
+			if runtimes.Choose(cfg).Both {
+				defer fmt.Printf("\n%s\n", runtimes.BothAdvice())
+			}
 
 			// The lines below keep their original wording. The detail lines come
 			// from the adapter's own data.

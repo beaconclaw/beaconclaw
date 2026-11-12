@@ -299,6 +299,20 @@ func ActionsLogPath() string {
 	return filepath.Join(stateDirectory(), "actions.log")
 }
 
+// SaveRuntime records which runtime this profile reports on, keeping other
+// settings. Once saved, the choice no longer depends on what is installed.
+func SaveRuntime(runtime string) error {
+	if runtime != "openclaw" && runtime != "hermes" {
+		return fmt.Errorf("unknown runtime %q: use openclaw or hermes", runtime)
+	}
+	fc, _ := loadFileConfig()
+	if fc == nil {
+		fc = &fileConfig{}
+	}
+	fc.Runtime = runtime
+	return writeFileConfig(fc)
+}
+
 // SaveChannel records this profile's release track, keeping other settings.
 func SaveChannel(channel string) error {
 	if !ValidChannel(channel) {

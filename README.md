@@ -61,7 +61,19 @@ On a machine running [Hermes Agent](https://github.com/NousResearch/hermes-agent
 - **Version:** the `code_version` Hermes writes into its state file.
 - **It never opens Hermes's `.env` file** or `auth.json`.
 
-The runtime is found automatically: a machine with Hermes and no OpenClaw is reported as Hermes. To choose, set `"runtime": "hermes"` (or `"openclaw"`) in the config file, or `BEACONCLAW_RUNTIME`. A Hermes home other than the default is set with `"hermes_home"` or `BEACONCLAW_HERMES_HOME`.
+Each copy of the agent reports on one runtime. `beaconclaw auth` saves which: the one given with `--runtime openclaw` or `--runtime hermes`, or the only one installed. A saved choice never changes by itself, so a runtime that is down is reported as down rather than swapped for another. With nothing saved, a machine with only Hermes is reported as Hermes, and anything else as OpenClaw, as in earlier versions. `BEACONCLAW_RUNTIME` overrides the saved choice. A Hermes home other than the default is set with `"hermes_home"` or `BEACONCLAW_HERMES_HOME`.
+
+### Both runtimes on one machine
+
+Each runtime is a separate agent in BeaconClaw, with its own token. Run one copy for each, as two [profiles](#profiles):
+
+```sh
+beaconclaw auth --runtime openclaw                       # the default profile watches OpenClaw
+beaconclaw --profile hermes auth --token bc_... --runtime hermes
+beaconclaw --profile hermes install
+```
+
+When both are installed and no choice is saved, `beaconclaw status` and the agent's log say so and print these commands. The default profile keeps reporting on OpenClaw meanwhile.
 
 Heartbeats the manager has not yet acknowledged are kept in `outbox.json` in the agent's config folder, readable only by your user, so an outage or a restart does not lose them. By default up to two hours' worth are kept; the oldest are dropped first. They are removed as soon as the manager confirms them.
 
